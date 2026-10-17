@@ -32,6 +32,51 @@ The wizard asks for:
 
 When prompted at the end, **fully quit Codex Desktop and reopen it**. Then send a small request. Changing only the server's hostname/IP later normally needs no Desktop restart because the local endpoint stays the same.
 
+## How it works
+
+Codex Desktop sends requests to a fixed address on your own computer. A small background connector forwards them to the proxy host: directly for a local installation, or through an encrypted SSH tunnel for a server/NAS installation. The SSH connection can use your LAN address or the configured Tailscale fallback.
+
+```mermaid
+flowchart LR
+    subgraph Client["Your computer"]
+        Desktop["Codex Desktop"]
+        Connector["Local connector<br/>127.0.0.1"]
+        Desktop -->|"Requests"| Connector
+    end
+
+    subgraph Host["Proxy host: same computer or SSH server / NAS"]
+        Gateway["Compatibility gateway<br/>127.0.0.1"]
+        Proxy["codex-multi-auth router<br/>Account selection and failover"]
+        Pool[("Account pool<br/>Stored only on the proxy host")]
+        Supervisor["Background supervisor<br/>Started by systemd or launchd"]
+        Gateway -->|"Requests with private router key"| Proxy
+        Pool -.->|"Credentials and account state"| Proxy
+        Supervisor -.->|"Starts and monitors"| Proxy
+    end
+
+    Connector -->|"Local installation: loopback"| Gateway
+    Connector -->|"Remote installation: SSH over LAN or Tailscale"| Gateway
+    Proxy <-->|"HTTPS requests and streamed responses"| OpenAI["OpenAI / Codex backend"]
+```
+
+The gateway adds the private router key and forwards streamed responses back along the same path. The upstream router owns account selection, token refresh, and failover between eligible accounts. Sequential mode follows account order; hybrid mode considers account health and quota. Available models and account eligibility still determine which account can serve a request.
+
+The background services keep running after the setup terminal closes, subject to the platform's login requirements described below. Account management and updates use a maintenance lock: existing requests drain, the router pauses, then it resumes after the operation. This keeps two processes from refreshing the same account tokens simultaneously. The optional update scheduler checks releases separately and applies the configured release-age delay.
+
+### Proxy-specific settings
+
+The underlying proxy is **[ndycode/codex-multi-auth](https://github.com/ndycode/codex-multi-auth)**. For settings beyond this installer's menu, consult its [configuration guide](https://github.com/ndycode/codex-multi-auth/blob/main/docs/configuration.md) and [command reference](https://github.com/ndycode/codex-multi-auth/blob/main/docs/reference/commands.md).
+
+Run upstream commands through this helper so they use the correct account pool and target, whether local or over SSH:
+
+```sh
+codex-ma-setup proxy -- --help
+codex-ma-setup proxy -- config explain
+codex-ma-setup proxy -- <upstream-command> <arguments>
+```
+
+Use `codex-ma-setup configure` for settings owned by this installer, such as SSH addresses, account strategy, and update schedules. The helper sets the router's account directory and strategy when it starts; upstream defaults may therefore be overridden by these managed settings. Files inside `current-proxy` belong to an installed release, so source edits there do not carry over to the next update.
+
 ## Daily commands
 
 | Command                                 | Purpose / upstream command                                                        |

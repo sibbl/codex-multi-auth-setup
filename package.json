@@ -1,0 +1,44 @@
+{
+  "name": "codex-multi-auth-setup",
+  "version": "0.1.0",
+  "description": "Guided local and SSH setup for codex-multi-auth with backups and delayed updates",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sk2andy/codex-multi-auth-setup.git"
+  },
+  "homepage": "https://github.com/sk2andy/codex-multi-auth-setup#readme",
+  "bugs": {
+    "url": "https://github.com/sk2andy/codex-multi-auth-setup/issues"
+  },
+  "type": "module",
+  "bin": {
+    "codex-ma-setup": "bin/codex-ma-setup.mjs"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node bin/codex-ma-setup.mjs",
+    "test": "node --test test/*.test.mjs",
+    "check": "node scripts/check.mjs",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@clack/prompts": "1.8.1",
+    "smol-toml": "1.9.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.13.0",
+    "prettier": "3.9.10"
+  },
+  "license": "MIT"
+}

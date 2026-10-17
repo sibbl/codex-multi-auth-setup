@@ -4,7 +4,7 @@ import { validHost, defaultServerRoot } from './config.mjs';
 
 export class Cancelled extends Error {
   constructor() {
-    super('Abgebrochen. Bestehende Backups bleiben erhalten.');
+    super('Cancelled. Existing backups are preserved.');
   }
 }
 export async function ask(promise) {
@@ -13,7 +13,7 @@ export async function ask(promise) {
   return value;
 }
 export const confirm = (message, initialValue = false) =>
-  ask(p.confirm({ message, initialValue, active: 'Ja', inactive: 'Nein' }));
+  ask(p.confirm({ message, initialValue, active: 'Yes', inactive: 'No' }));
 export const text = (message, initialValue = '', validate) =>
   ask(p.text({ message, initialValue, validate }));
 export const select = (message, options, initialValue) =>
@@ -21,71 +21,64 @@ export const select = (message, options, initialValue) =>
 
 export function absolutePath(value) {
   if (!value || !path.isAbsolute(value) || /[\r\n\0]/.test(value))
-    return 'Bitte absoluten Pfad ohne Steuerzeichen angeben.';
+    return 'Enter an absolute path without control characters.';
   if (value === '/' || value === '/usr' || value === '/etc')
-    return 'Bitte einen eigenen Installationsordner wählen.';
+    return 'Choose a dedicated installation directory.';
 }
 
 export async function askSsh(previous = {}) {
   const host = await text(
-    'SSH-Ziel: Alias, user@Hostname oder user@IP',
+    'SSH target: alias, user@hostname or user@IP',
     previous.host ?? '',
-    (value) => (!validHost(value) ? 'Beispiel: dev@server.local oder mein-nas' : undefined),
+    (value) => (!validHost(value) ? 'Example: dev@server.local or my-nas' : undefined),
   );
   const port = Number(
-    await text('SSH-Port', String(previous.port ?? 22), (value) =>
+    await text('SSH port', String(previous.port ?? 22), (value) =>
       !/^\d+$/.test(value ?? '') || Number(value) < 1 || Number(value) > 65535
-        ? 'Port 1–65535 angeben.'
+        ? 'Enter a port from 1–65535.'
         : undefined,
     ),
   );
   const useFallback = await confirm(
-    'Zweite Adresse als Fallback nutzen, z. B. Tailscale für unterwegs?',
+    'Use a second address as a fallback, e.g. Tailscale when away from home?',
     Boolean(previous.fallbackHost),
   );
   const fallbackHost = useFallback
     ? await text(
-        'Fallback-SSH-Ziel (vollständiger Alias oder user@Adresse)',
+        'Fallback SSH target (full alias or user@address)',
         previous.fallbackHost ?? '',
-        (value) => (!validHost(value) ? 'Gültiges SSH-Ziel angeben.' : undefined),
+        (value) => (!validHost(value) ? 'Enter a valid SSH target.' : undefined),
       )
     : null;
-  const customKey = await confirm(
-    'Bestimmte SSH-Schlüsseldatei verwenden?',
-    Boolean(previous.identityFile),
-  );
+  const customKey = await confirm('Use a specific SSH key file?', Boolean(previous.identityFile));
   const identityFile = customKey
-    ? await text(
-        'Absoluter Pfad zum privaten SSH-Schlüssel',
-        previous.identityFile ?? '',
-        absolutePath,
-      )
+    ? await text('Absolute path to the private SSH key', previous.identityFile ?? '', absolutePath)
     : null;
   p.note(
-    'Beide Adressen benötigen denselben Zugang zum Zielserver.\n.local-Namen funktionieren normalerweise nur im lokalen Netz.\nSSH-Konfiguration und SSH-Agent werden berücksichtigt.',
-    'SSH-Verbindung',
+    'Both addresses must provide access to the same target server.\n.local names usually only work on the local network.\nYour SSH configuration and SSH agent are used.',
+    'SSH connection',
   );
   return { host, port, fallbackHost, identityFile, hostKeyAlias: previous.hostKeyAlias ?? null };
 }
 
 export async function askStrategy(previous = 'sequential') {
   return select(
-    'Wie sollen Accounts ausgewählt werden?',
+    'How should accounts be selected?',
     [
       {
         value: 'sequential',
-        label: 'Sequenziell',
-        hint: 'Account-Reihenfolge; bei Limits ausweichen',
+        label: 'Sequential',
+        hint: 'Follow account order; switch when limits are reached',
       },
       {
         value: 'hybrid',
         label: 'Hybrid',
-        hint: 'Verteilung nach Gesundheit und verfügbarer Quota',
+        hint: 'Distribute by account health and available quota',
       },
       {
         value: 'round-robin',
         label: 'Round-Robin',
-        hint: 'Vom Proxy derzeit nicht unterstützt',
+        hint: 'Currently unsupported by the proxy',
         disabled: true,
       },
     ],
@@ -94,27 +87,24 @@ export async function askStrategy(previous = 'sequential') {
 }
 
 export async function askUpdates(previous = {}) {
-  const enabled = await confirm('Automatische Updates einrichten?', previous.enabled ?? true);
-  const cli = await confirm(
-    'Zusätzlich eine verwaltete Codex-CLI installieren/aktualisieren?',
-    previous.cli ?? true,
-  );
+  const enabled = await confirm('Set up automatic updates?', previous.enabled ?? true);
+  const cli = await confirm('Also install or update a managed Codex CLI?', previous.cli ?? true);
   const delayHours = Number(
     await text(
-      'Proxy-Releases erst nach wie vielen Stunden installieren?',
+      'How many hours should proxy releases wait before installation?',
       String(previous.delayHours ?? 48),
       (value) =>
         !/^\d+(\.\d+)?$/.test(value ?? '') || Number(value) > 8760
-          ? '0–8760 Stunden angeben; Standard: 48.'
+          ? 'Enter 0–8760 hours; default: 48.'
           : undefined,
     ),
   );
   const intervalHours = enabled
     ? await select(
-        'Wie oft nach Updates suchen?',
+        'How often should updates be checked?',
         [1, 2, 3, 4, 6, 8, 12, 24].map((value) => ({
           value,
-          label: value === 1 ? 'Stündlich' : `Alle ${value} Stunden`,
+          label: value === 1 ? 'Hourly' : `Every ${value} hours`,
         })),
         previous.intervalHours ?? 1,
       )
@@ -124,7 +114,7 @@ export async function askUpdates(previous = {}) {
 
 export async function askLocation(home, previous) {
   return text(
-    'Installationsordner auf dem Ziel (z. B. eigener Ordner auf dem NAS-Storage)',
+    'Installation directory on the target (e.g. a dedicated folder on NAS storage)',
     previous ?? defaultServerRoot(home),
     absolutePath,
   );
@@ -138,7 +128,7 @@ export async function busy(label, action) {
     spinner.stop(label);
     return result;
   } catch (error) {
-    spinner.stop(`${label}: fehlgeschlagen`, 1);
+    spinner.stop(`${label}: failed`, 1);
     throw error;
   }
 }

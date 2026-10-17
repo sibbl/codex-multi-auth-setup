@@ -137,5 +137,5 @@ test('proxy launcher replacement is backed up, executable and idempotent with sh
     { check: false },
   );
   assert.equal(invalid.code, 1);
-  assert.match(invalid.stderr, /absoluten Installationspfad/);
+  assert.match(invalid.stderr, /absolute installation path/);
 });

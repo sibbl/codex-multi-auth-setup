@@ -58,7 +58,7 @@ test('standalone forwarder is the single management profile and metadata stays o
   assert.equal(loaded.clientRoot, root);
   assert.deepEqual(JSON.parse(JSON.stringify(loaded)), profile);
   await fs.writeFile(path.join(root, 'client.json'), '{}');
-  await assert.rejects(loadClient(root), /genau ein aktives Profil/);
+  await assert.rejects(loadClient(root), /exactly one active profile/);
   await fs.rm(filename);
   assert.equal((await loadClient(root)).configFile, path.join(root, 'client.json'));
 });
@@ -80,7 +80,7 @@ test('stats and proxy JSON commands use existing Docker launcher without a manag
       cwd: os.tmpdir(),
     });
     assert.deepEqual(JSON.parse(output.stdout), { args: expected, accounts: [{ id: 'existing' }] });
-    assert.match(output.stderr, /Weiterleitung/);
+    assert.match(output.stderr, /Forwarding/);
   }
   assert.equal(await fs.readFile(filename, 'utf8'), original);
   await assert.rejects(fs.access(path.join(root, 'client.json')), { code: 'ENOENT' });
@@ -103,7 +103,7 @@ test('external profiles reject managed operations and desktop changes keep same 
     /openai_base_url = "http:\/\/127.0.0.1:64412"/,
   );
   assert.equal(await fs.readFile(filename, 'utf8'), original);
-  await assert.rejects(recover(root), /verwaltete Installation/);
+  await assert.rejects(recover(root), /managed installation/);
   for (const args of [
     ['updates', 'run'],
     ['codex', '--', '--version'],
@@ -112,7 +112,7 @@ test('external profiles reject managed operations and desktop changes keep same 
       check: false,
     });
     assert.equal(output.code, 1);
-    assert.match(output.stdout + output.stderr, /verwaltete Installation|Codex-CLI/);
+    assert.match(output.stdout + output.stderr, /managed installation|managed Codex CLI/);
   }
   await assert.rejects(fs.access(path.join(root, 'client.json')), { code: 'ENOENT' });
 });

@@ -68,8 +68,7 @@ async function installTerminalLauncher(
       shellConfigs.push(login);
     } else if (name === 'fish')
       shellConfig = path.join(xdgConfigHome || path.join(home, '.config'), 'fish', 'config.fish');
-    else
-      warning = `Shell ${shell || '(unbekannt)'}: ${directory} bitte selbst zum PATH hinzufügen.`;
+    else warning = `Shell ${shell || '(unknown)'}: add ${directory} to PATH manually.`;
     if (shellConfig) {
       shellConfigs.unshift(shellConfig);
       const line =
@@ -84,7 +83,7 @@ async function installTerminalLauncher(
           return config;
         });
         sources.push(config, shellTarget);
-        shellContent += `${shellContent && !shellContent.endsWith('\n') ? '\n' : ''}\n# codex-multi-auth-setup: Terminal-Befehl\n${line}\n`;
+        shellContent += `${shellContent && !shellContent.endsWith('\n') ? '\n' : ''}\n# codex-multi-auth-setup: terminal command\n${line}\n`;
         shellChanges.push({ target: shellTarget, content: shellContent });
         pathUpdated = true;
       }

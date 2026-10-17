@@ -222,7 +222,7 @@ update() {
     cp -Pp "$file" "$backup/$index-link"
     cp -Lp "$file" "$backup/$index-content"
   fi
-  printf '\\n# codex-multi-auth-setup: Terminal-Befehl\\n%s\\n' "$line" >> "$file"
+  printf '\\n# codex-multi-auth-setup: terminal command\\n%s\\n' "$line" >> "$file"
 }
 case "\${SHELL##*/}" in
   bash)

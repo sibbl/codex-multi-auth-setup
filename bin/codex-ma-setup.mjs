@@ -17,38 +17,38 @@ import {
 
 const help = `Codex Multi Auth Setup
 
-  codex-ma-setup                         Geführtes Menü
-  codex-ma-setup install                 Lokal oder per SSH installieren
-  codex-ma-setup connect                 Vorhandenen SSH-Proxy verbinden
-  codex-ma-setup connect --container NAME Vorhandenen Docker-Proxy im Forwarder-Profil anbinden
-  codex-ma-setup resume                  Unterbrochene Einrichtung fortsetzen
-  codex-ma-setup recover                 Unterbrochene Wartung wiederherstellen
-  codex-ma-setup configure               Adresse, Routing, Updates ändern
-  codex-ma-setup accounts add|list|remove Offizielle Account-Verwaltung
+  codex-ma-setup                         Guided menu
+  codex-ma-setup install                 Install locally or over SSH
+  codex-ma-setup connect                 Connect an existing SSH proxy
+  codex-ma-setup connect --container NAME Connect an existing Docker proxy to the forwarder profile
+  codex-ma-setup resume                  Resume interrupted setup
+  codex-ma-setup recover                 Recover interrupted maintenance
+  codex-ma-setup configure               Change address, routing and updates
+  codex-ma-setup accounts add|list|remove Official account management
   codex-ma-setup stats                   codex-multi-auth status
-  codex-ma-setup proxy -- <command>      Beliebigen offiziellen Proxy-Befehl öffnen
+  codex-ma-setup proxy -- <command>      Run any official proxy command
   codex-ma-setup updates enable|disable|configure|check|run|status
-  codex-ma-setup doctor                  Verbindung und Modelle prüfen
-  codex-ma-setup codex -- <args>          Verwaltete Codex-CLI auf dem Ziel starten
+  codex-ma-setup doctor                  Check connection and models
+  codex-ma-setup codex -- <args>          Run the managed Codex CLI on the target
 
-  --client-root /absoluter/pfad          Separate Installation / Client-Konfiguration
-  --help                                Diese Hilfe
+  --client-root /absolute/path           Separate installation / client configuration
+  --help                                Show this help
 
-Accounts bleiben beim Proxy-Tool. „remove“ öffnet dessen offiziellen Account-Manager.
-Round-Robin wird upstream nicht unterstützt; angeboten werden sequenziell und hybrid.
+Accounts are managed by the proxy tool. "remove" opens its official account manager.
+Round-robin is unsupported upstream; sequential and hybrid are available.
 `;
 
 async function main() {
   process.umask(0o077);
   const [major, minor] = process.versions.node.split('.').map(Number);
-  if (major < 22 || (major === 22 && minor < 19)) throw new Error('Node.js >=22.19 erforderlich.');
+  if (major < 22 || (major === 22 && minor < 19)) throw new Error('Node.js >=22.19 is required.');
   const args = process.argv.slice(2);
   let clientRoot = defaultClientRoot();
   const index = args.indexOf('--client-root');
   if (index !== -1 && (args.indexOf('--') === -1 || index < args.indexOf('--'))) {
     clientRoot = args[index + 1];
     if (!clientRoot?.startsWith('/') || /[\r\n\0]/.test(clientRoot))
-      throw new Error('--client-root benötigt einen absoluten Pfad.');
+      throw new Error('--client-root requires an absolute path.');
     args.splice(index, 2);
   }
   const command = args.shift();
@@ -66,7 +66,7 @@ async function main() {
     !containerConnect
   ) {
     if (!process.stdin.isTTY)
-      throw new Error('Der Einrichtungsdialog benötigt ein Terminal. Nutze --help für Befehle.');
+      throw new Error('Interactive setup requires a terminal. Use --help to see commands.');
   }
   switch (command) {
     case undefined:
@@ -102,7 +102,7 @@ async function main() {
       const client = await loadClient(clientRoot);
       if (client.management?.type === 'docker' || client.configFile.endsWith('/forwarder.json'))
         throw new Error(
-          'Verwaltete Codex-CLI für bestehenden Docker-Proxy nicht eingerichtet. Nutze proxy für Proxy-Befehle.',
+          'A managed Codex CLI is not configured for the existing Docker proxy. Use proxy for proxy commands.',
         );
       return new Target(client).worker(
         'codex',
@@ -111,7 +111,7 @@ async function main() {
       );
     }
     default:
-      throw new Error(`Unbekannter Befehl: ${command}. Nutze --help.`);
+      throw new Error(`Unknown command: ${command}. Use --help.`);
   }
 }
 
@@ -119,7 +119,7 @@ main().catch((error) => {
   if (error instanceof Cancelled) p.cancel(error.message);
   else {
     p.log.error(error.message);
-    p.log.info('Backups bleiben erhalten. Diagnose: codex-ma-setup doctor');
+    p.log.info('Backups are preserved. Run diagnostics: codex-ma-setup doctor');
   }
   process.exitCode = error instanceof Cancelled ? 130 : 1;
 });

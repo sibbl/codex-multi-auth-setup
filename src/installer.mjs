@@ -27,6 +27,7 @@ import { backupFiles } from './backup.mjs';
 import { run } from './process.mjs';
 import { installServices } from './services.mjs';
 import { installTailscale } from './tailscale.mjs';
+import { installLauncher } from './launcher.mjs';
 
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const jsonResult = (result) => JSON.parse(result.stdout.trim().split('\n').at(-1));
@@ -82,7 +83,15 @@ export async function installManager(target, root, node) {
       ['pack', '--ignore-scripts', '--json', '--pack-destination', temporary],
       { cwd: projectRoot },
     );
-    const filename = JSON.parse(result.stdout)[0].filename;
+    const report = JSON.parse(result.stdout);
+    const packages = Array.isArray(report) ? report : Object.values(report);
+    const filename = packages.length === 1 ? packages[0]?.filename : undefined;
+    if (
+      typeof filename !== 'string' ||
+      path.basename(filename) !== filename ||
+      !filename.endsWith('.tgz')
+    )
+      throw new Error('npm pack returned an invalid package archive');
     const archive = path.join(root, `.manager-${crypto.randomUUID()}.tgz`);
     await target.write(archive, await fs.readFile(path.join(temporary, filename)));
     const directory = path.join(root, 'manager');
@@ -133,6 +142,14 @@ async function startClientServices(client) {
   if (config.systemService) await run('sudo', ['-v'], { interactive: true });
   p.log.step('Lokalen Verbindungsdienst installieren/starten');
   return installServices(config, { role: 'client' });
+}
+
+async function installClientLauncher(client) {
+  const launcher = await installLauncher(client);
+  p.log.info(`Terminal-Befehl bereit: ${launcher.path}`);
+  if (launcher.pathUpdated) p.log.info('Für den Befehl im PATH ein neues Terminal öffnen.');
+  if (launcher.warning) p.log.warn(launcher.warning);
+  return launcher;
 }
 
 export async function writeDesktop(client) {
@@ -368,6 +385,7 @@ export async function install(clientRoot = defaultClientRoot()) {
     await busy('Lokalen Verbindungsdienst installieren', () =>
       installManager(new Target({ mode: 'local' }), clientRoot, process.execPath),
     );
+  await installClientLauncher(client);
   const initialized = await busy('Proxy und optionale CLI prüfen und installieren', async () =>
     jsonResult(await target.worker('initialize', { config })),
   );
@@ -427,6 +445,10 @@ export async function resume(clientRoot = defaultClientRoot()) {
   if (!client.pending) throw new Error('Einrichtung bereits abgeschlossen. Nutze configure.');
   const target = new Target(client);
   if (client.clientOnly) {
+    const local = new Target({ mode: 'local' });
+    if (!(await local.exists(path.join(client.clientAppDir, 'bin/codex-ma-setup.mjs'))))
+      await installManager(local, clientRoot, client.clientNode);
+    await installClientLauncher(client);
     await startClientServices(client);
     await waitForClient(client);
     if (client.desktop) await writeDesktop(client);
@@ -451,6 +473,7 @@ export async function resume(clientRoot = defaultClientRoot()) {
   ) {
     await installManager(new Target({ mode: 'local' }), clientRoot, client.clientNode);
   }
+  await installClientLauncher(client);
   if (await target.exists(path.join(client.root, 'config.json'))) {
     const state = jsonResult(await target.worker('read'));
     if (state.installationId !== client.installationId)
@@ -528,6 +551,7 @@ export async function connect(clientRoot = defaultClientRoot()) {
     desktop: await confirm('Codex Desktop verbinden?', true),
   };
   await atomicJson(path.join(clientRoot, 'client.json'), client);
+  await installClientLauncher(client);
   await startClientServices(client);
   await busy('Verbindung prüfen', () => waitForClient(client));
   if (client.desktop) await writeDesktop(client);
@@ -543,6 +567,13 @@ export async function connect(clientRoot = defaultClientRoot()) {
 export async function configure(clientRoot = defaultClientRoot(), requested) {
   p.intro('Codex Multi Auth · Änderungen');
   let client = await loadClient(clientRoot);
+  if (
+    client.clientAppDir &&
+    (await new Target({ mode: 'local' }).exists(
+      path.join(client.clientAppDir, 'bin/codex-ma-setup.mjs'),
+    ))
+  )
+    await installClientLauncher(client);
   const choice =
     requested ??
     (await select('Was möchtest du ändern?', [

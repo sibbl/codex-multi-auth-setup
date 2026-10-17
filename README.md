@@ -17,7 +17,17 @@ npm start
 
 The repository is public; cloning does not require a GitHub account. Nothing is published to npm by this project.
 
-For the short commands below, run `npm install --global .` once. Without a global installation, use `npm start -- stats` (or another command) from the checkout. Background services use their own installed copy and do not depend on the checkout remaining open.
+Setup automatically installs `codex-ma-setup` into `~/.local/bin`, using its own
+installed manager and Node runtime. All subcommands then work from any directory.
+If needed, setup adds that directory to your interactive zsh, bash, or fish
+configuration; open a new terminal afterward. Other shells show a manual PATH
+instruction. Existing launcher and shell files are backed up before changes.
+
+The launcher remembers the client profile used during setup. Use
+`codex-ma-setup --client-root /absolute/path stats` to choose another profile.
+Before setup, run commands with `npm start -- stats` (or another command) from the
+checkout. Background services and the installed terminal command use their own
+copy and do not depend on the checkout remaining open.
 
 The wizard asks for:
 
@@ -160,6 +170,39 @@ Use the actual port from your installation. Check SSH configuration before reloa
 Tailscale fallback preserves the encrypted SSH connection. It does not expose an unauthenticated HTTP proxy to the LAN or Tailnet. Browser-origin requests and non-loopback Host headers are rejected by the compatibility gateway.
 
 ## Backups and files
+
+### Forwarder configuration
+
+The shared connector is `src/forwarder.mjs`. Managed installations start it with
+`--root CLIENT_ROOT`, reading `CLIENT_ROOT/client.json`. That file controls
+`mode` (`local` or `ssh`), `ports.client` (Desktop listener), `ports.gateway`
+(gateway on the proxy host), `ports.tunnel` (local SSH tunnel), and `ssh` options
+(`host`, optional `fallbackHost`, `port`, `identityFile`, `hostKeyAlias`). SSH
+destinations include the username, for example `user@server.example`.
+
+For a standalone connector to an existing gateway, copy
+[`examples/forwarder.json`](examples/forwarder.json) to a private location such as
+`~/.config/codex-multi-auth-setup/forwarder.json`, edit its values, and start:
+
+```bash
+node src/forwarder.mjs --config /absolute/path/to/forwarder.json
+```
+
+Use this same command in your background service. A standalone file is separate
+from the installer's `client.json`; it does not register a managed server or enable
+installer account/update commands. Restart the connector after changing the file.
+When changing `ports.client`, also update Desktop's `openai_base_url` to
+`http://127.0.0.1:CLIENT_PORT` and fully restart Desktop. In `local` mode the
+connector reaches the local loopback gateway directly; `ssh` options and
+`ports.tunnel` are not required.
+
+The default `healthCheck: "setup"` requires this installer's owned health response
+and verifies `installationId` when present. For an existing legacy compatibility
+gateway only, explicitly select `healthCheck: "legacy"`: this checks for HTTP 404
+at `/__websocket_auth_check__`. This checks reachability without proving installation
+identity, so it cannot be combined with `installationId`. There is no automatic
+fallback to the legacy check. LAN and Tailscale fallback routes must still lead to
+the same trusted proxy host.
 
 Default client metadata: `~/.config/codex-multi-auth-setup/client.json`. Default server directory: `~/.local/share/codex-multi-auth-setup`. You can select a NAS storage directory instead. Use `--client-root /absolute/path` before `--` to manage a separate client profile.
 

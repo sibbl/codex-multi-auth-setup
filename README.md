@@ -9,13 +9,13 @@ The wizard uses [`@clack/prompts`](https://github.com/bombshell-dev/clack). Prom
 Requires Node.js **22.19 or newer**, npm, and macOS or Linux. For a remote installation, you also need an existing SSH account with key/agent authentication. Windows users can run the server-side tools in WSL2; native Windows Desktop integration is not implemented.
 
 ```sh
-git clone git@github.com:sk2andy/codex-multi-auth-setup.git
+git clone https://github.com/sk2andy/codex-multi-auth-setup.git
 cd codex-multi-auth-setup
 npm ci
 npm start
 ```
 
-A private repository requires GitHub access for each colleague. Nothing is published to npm by this project.
+The repository is public; cloning does not require a GitHub account. Nothing is published to npm by this project.
 
 For the short commands below, run `npm install --global .` once. Without a global installation, use `npm start -- stats` (or another command) from the checkout. Background services use their own installed copy and do not depend on the checkout remaining open.
 

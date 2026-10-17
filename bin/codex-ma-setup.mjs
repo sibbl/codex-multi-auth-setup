@@ -20,6 +20,7 @@ const help = `Codex Multi Auth Setup
   codex-ma-setup                         Geführtes Menü
   codex-ma-setup install                 Lokal oder per SSH installieren
   codex-ma-setup connect                 Vorhandenen SSH-Proxy verbinden
+  codex-ma-setup connect --container NAME Vorhandenen Docker-Proxy im Forwarder-Profil anbinden
   codex-ma-setup resume                  Unterbrochene Einrichtung fortsetzen
   codex-ma-setup recover                 Unterbrochene Wartung wiederherstellen
   codex-ma-setup configure               Adresse, Routing, Updates ändern
@@ -59,7 +60,11 @@ async function main() {
     process.stdout.write('0.1.0\n');
     return;
   }
-  if (['install', 'connect', 'resume', 'recover', 'configure'].includes(command) || !command) {
+  const containerConnect = command === 'connect' && args[0] === '--container' && args.length === 2;
+  if (
+    (['install', 'connect', 'resume', 'recover', 'configure'].includes(command) || !command) &&
+    !containerConnect
+  ) {
     if (!process.stdin.isTTY)
       throw new Error('Der Einrichtungsdialog benötigt ein Terminal. Nutze --help für Befehle.');
   }
@@ -69,7 +74,8 @@ async function main() {
     case 'install':
       return install(clientRoot);
     case 'connect':
-      return connect(clientRoot);
+      if (args.length && !containerConnect) throw new Error('connect: --container NAME');
+      return connect(clientRoot, containerConnect ? { container: args[1] } : {});
     case 'resume':
       return resume(clientRoot);
     case 'recover':
@@ -92,12 +98,18 @@ async function main() {
       return accountAction(clientRoot, 'proxy', args[0] === '--' ? args.slice(1) : args);
     case 'updates':
       return updatesAction(clientRoot, args[0] ?? 'configure');
-    case 'codex':
-      return new Target(await loadClient(clientRoot)).worker(
+    case 'codex': {
+      const client = await loadClient(clientRoot);
+      if (client.management?.type === 'docker' || client.configFile.endsWith('/forwarder.json'))
+        throw new Error(
+          'Verwaltete Codex-CLI für bestehenden Docker-Proxy nicht eingerichtet. Nutze proxy für Proxy-Befehle.',
+        );
+      return new Target(client).worker(
         'codex',
         { args: args[0] === '--' ? args.slice(1) : args },
         { interactive: true },
       );
+    }
     default:
       throw new Error(`Unbekannter Befehl: ${command}. Nutze --help.`);
   }

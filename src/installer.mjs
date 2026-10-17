@@ -14,6 +14,7 @@ import {
   askLocation,
   busy,
   Cancelled,
+  text,
 } from './prompts.mjs';
 import { Target, ensureNode } from './target.mjs';
 import {
@@ -22,20 +23,76 @@ import {
   publicConfig,
   setDesktopEndpoint,
   defaultClientRoot,
+  validHost,
 } from './config.mjs';
 import { backupFiles } from './backup.mjs';
 import { run } from './process.mjs';
 import { installServices } from './services.mjs';
 import { installTailscale } from './tailscale.mjs';
 import { installLauncher } from './launcher.mjs';
+import { accountArguments } from './worker.mjs';
+import { installDockerManagement, validateDockerManagement } from './docker.mjs';
 
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const jsonResult = (result) => JSON.parse(result.stdout.trim().split('\n').at(-1));
 
 export async function loadClient(root = defaultClientRoot()) {
-  const config = await readJson(path.join(root, 'client.json'), null);
+  const managedFile = path.join(root, 'client.json');
+  const forwarderFile = path.join(root, 'forwarder.json');
+  const managed = await readJson(managedFile, null);
+  const forwarder = await readJson(forwarderFile, null);
+  if (managed && forwarder)
+    throw new Error(
+      'client.json und forwarder.json vorhanden. Bitte genau ein aktives Profil behalten.',
+    );
+  const config = managed ?? forwarder;
   if (!config) throw new Error('Noch keine Installation. Starte: codex-ma-setup install');
+  if (forwarder) validateForwarderProfile(config);
+  Object.defineProperty(config, 'configFile', { value: managed ? managedFile : forwarderFile });
+  if (!config.clientRoot) Object.defineProperty(config, 'clientRoot', { value: root });
+  if (!config.codexHome)
+    Object.defineProperty(config, 'codexHome', {
+      value: process.env.CODEX_HOME
+        ? path.resolve(process.env.CODEX_HOME)
+        : path.join(os.homedir(), '.codex'),
+    });
   return config;
+}
+
+function validateForwarderProfile(config) {
+  if (!['local', 'ssh'].includes(config.mode))
+    throw new Error('Forwarder mode must be local or ssh');
+  for (const name of ['client', 'gateway', ...(config.mode === 'ssh' ? ['tunnel'] : [])])
+    if (
+      !Number.isInteger(config.ports?.[name]) ||
+      config.ports[name] < 1 ||
+      config.ports[name] > 65535
+    )
+      throw new Error(`Invalid ${name} port`);
+  if (
+    config.mode === 'ssh' &&
+    (!validHost(config.ssh?.host) ||
+      (config.ssh.fallbackHost && !validHost(config.ssh.fallbackHost)))
+  )
+    throw new Error('Invalid SSH hostname/address');
+  if (config.management) validateDockerManagement(config.management);
+  return config;
+}
+
+function requireManaged(client) {
+  if (client.management?.type === 'docker' || client.configFile?.endsWith('/forwarder.json'))
+    throw new Error(
+      'Bestehender Docker-Proxy: Dieser Befehl benötigt eine verwaltete Installation. Nutze stats, accounts, proxy, configure oder doctor.',
+    );
+  return client;
+}
+
+function requireDockerManagement(client) {
+  if (!client.management)
+    throw new Error(
+      'Forwarder vorhanden, Account-Verwaltung fehlt. Verbinde den vorhandenen Proxy: codex-ma-setup connect --container CONTAINER',
+    );
+  return validateDockerManagement(client.management);
 }
 
 export async function portAvailable(port) {
@@ -243,6 +300,12 @@ async function configureTailscale(target, info, clientRoot, serverRoot, mode) {
 
 export async function install(clientRoot = defaultClientRoot()) {
   p.intro('Codex Multi Auth · Einrichtung');
+  if (await readJson(path.join(clientRoot, 'forwarder.json'), null)) {
+    await loadClient(clientRoot);
+    throw new Error(
+      'Forwarder vorhanden. Bestehenden Proxy über codex-ma-setup connect --container CONTAINER anbinden.',
+    );
+  }
   const existingClient = await readJson(path.join(clientRoot, 'client.json'), null);
   if (existingClient?.pending) return resume(clientRoot);
   if (existingClient) {
@@ -441,7 +504,7 @@ async function finishOnboarding(client, target) {
 
 export async function resume(clientRoot = defaultClientRoot()) {
   p.intro('Unterbrochene Einrichtung fortsetzen');
-  const client = await loadClient(clientRoot);
+  const client = requireManaged(await loadClient(clientRoot));
   if (!client.pending) throw new Error('Einrichtung bereits abgeschlossen. Nutze configure.');
   const target = new Target(client);
   if (client.clientOnly) {
@@ -492,7 +555,7 @@ export async function resume(clientRoot = defaultClientRoot()) {
 }
 
 export async function recover(clientRoot = defaultClientRoot()) {
-  const client = await loadClient(clientRoot);
+  const client = requireManaged(await loadClient(clientRoot));
   p.note(
     'Behebt eine unterbrochene Wartung über deren Journal.\nAktuelle Account-Tokens werden dabei nicht durch Backups ersetzt.\nEine noch laufende Wartung wird nicht übernommen.',
     'Wiederherstellung',
@@ -502,8 +565,44 @@ export async function recover(clientRoot = defaultClientRoot()) {
   p.note(JSON.stringify(result, null, 2), 'Ergebnis');
 }
 
-export async function connect(clientRoot = defaultClientRoot()) {
+export async function connect(clientRoot = defaultClientRoot(), { container } = {}) {
   p.intro('Vorhandenen Proxy verbinden');
+  const forwarder = await readJson(path.join(clientRoot, 'forwarder.json'), null);
+  if (forwarder || container) {
+    const client = await loadClient(clientRoot);
+    if (!client.configFile.endsWith('/forwarder.json'))
+      throw new Error('Docker-Verbindung benötigt ein vorhandenes forwarder.json-Profil.');
+    const selected =
+      container ??
+      (await text(
+        'Name des vorhandenen Proxy-Containers',
+        client.management?.container ?? '',
+        (value) =>
+          !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value ?? '')
+            ? 'Gültigen Docker-Containernamen angeben.'
+            : undefined,
+      ));
+    const target = new Target(client);
+    const management = await installDockerManagement(target, selected);
+    const clientAppDir = await installManager(
+      new Target({ mode: 'local' }),
+      clientRoot,
+      process.execPath,
+    );
+    const next = {
+      ...client,
+      management,
+      clientRoot,
+      clientNode: process.execPath,
+      clientAppDir,
+      codexHome: client.codexHome,
+    };
+    await backupFiles(clientRoot, [client.configFile], 'connect existing Docker proxy');
+    await atomicJson(client.configFile, next);
+    await installClientLauncher(next);
+    p.outro(`Vorhandener Proxy verbunden. CLI auf dem Proxy-Host: ${management.launcher}`);
+    return next;
+  }
   if (await readJson(path.join(clientRoot, 'client.json'), null))
     throw new Error('Client vorhanden. Nutze configure oder einen anderen --client-root.');
   const codexHome = process.env.CODEX_HOME
@@ -567,6 +666,43 @@ export async function connect(clientRoot = defaultClientRoot()) {
 export async function configure(clientRoot = defaultClientRoot(), requested) {
   p.intro('Codex Multi Auth · Änderungen');
   let client = await loadClient(clientRoot);
+  if (client.configFile.endsWith('/forwarder.json')) {
+    const choice =
+      requested ??
+      (await select('Was möchtest du ändern?', [
+        ...(client.mode === 'ssh'
+          ? [{ value: 'host', label: 'Hostname / IP / SSH-Schlüssel / Fallback' }]
+          : []),
+        { value: 'desktop', label: 'Desktop-Verbindung einrichten / reparieren' },
+      ]));
+    if (choice === 'desktop') {
+      await writeDesktop(client);
+      p.outro('Desktop-Konfiguration angepasst. Codex Desktop vollständig neu starten.');
+      return;
+    }
+    if (choice !== 'host' || client.mode !== 'ssh') requireManaged(client);
+    const management = requireDockerManagement(client);
+    const ssh = await askSsh(client.ssh);
+    await backupFiles(
+      clientRoot,
+      [client.configFile, path.join(os.homedir(), '.ssh', 'known_hosts')],
+      'configure external SSH host',
+    );
+    const target = new Target({ ...client, clientRoot, ssh });
+    await target.trust();
+    const identity = (await target.run(management.launcher, ['--setup-identity'])).stdout.trim();
+    if (identity !== management.identity)
+      throw new Error(
+        'Die neue Adresse zeigt auf einen anderen Proxy. Keine Änderung gespeichert.',
+      );
+    if (ssh.fallbackHost)
+      await new Target({ ...client, clientRoot, ssh: { ...ssh, host: ssh.fallbackHost } }).trust();
+    await atomicJson(client.configFile, { ...client, ssh });
+    p.outro(
+      'Adresse im bestehenden Profil geändert. Deinen Verbindungsdienst neu starten, damit er die Datei neu liest.',
+    );
+    return;
+  }
   if (
     client.clientAppDir &&
     (await new Target({ mode: 'local' }).exists(
@@ -654,6 +790,8 @@ export async function configure(clientRoot = defaultClientRoot(), requested) {
 
 export async function accountAction(clientRoot, command, args = []) {
   const client = await loadClient(clientRoot);
+  const external = client.configFile.endsWith('/forwarder.json');
+  const management = external ? requireDockerManagement(client) : null;
   if (command === 'remove')
     p.note(
       'Der offizielle Proxy unterstützt keinen direkten „remove“-Unterbefehl.\nEs öffnet sich sein Account-Manager: Account auswählen, dann Löschen (D).',
@@ -683,6 +821,15 @@ export async function accountAction(clientRoot, command, args = []) {
         ].includes(args[0])));
   if (structured) {
     process.stderr.write(`Weiterleitung an ${reference}\n`);
+    if (management) {
+      const result = await new Target(client).run(
+        management.launcher,
+        accountArguments({ command, args }),
+        { interactive: false },
+      );
+      process.stdout.write(result.stdout);
+      return result;
+    }
     const result = jsonResult(
       await new Target(client).worker('accounts', { command, args, interactive: false }),
     );
@@ -690,10 +837,15 @@ export async function accountAction(clientRoot, command, args = []) {
     return;
   }
   p.log.info(`Weiterleitung an ${reference}.`);
+  if (management)
+    return new Target(client).run(management.launcher, accountArguments({ command, args }), {
+      interactive: true,
+    });
   await new Target(client).worker('accounts', { command, args }, { interactive: true });
 }
 
 export async function updatesAction(clientRoot, action) {
+  requireManaged(await loadClient(clientRoot));
   if (['configure', 'enable', 'disable'].includes(action)) {
     if (action === 'configure') return configure(clientRoot, 'updates');
     const client = await loadClient(clientRoot);
@@ -728,6 +880,49 @@ export async function updatesAction(clientRoot, action) {
 
 export async function doctor(clientRoot) {
   const client = await loadClient(clientRoot);
+  if (client.configFile.endsWith('/forwarder.json')) {
+    const management = requireDockerManagement(client);
+    const target = new Target(client);
+    const checks = [];
+    try {
+      const identity = (await target.run(management.launcher, ['--setup-identity'])).stdout.trim();
+      if (identity !== management.identity)
+        throw new Error('Proxy-Identität stimmt nicht mit dem Profil überein.');
+      checks.push({ name: 'Proxy-CLI', ok: true, detail: management.launcher });
+      const status = JSON.parse(
+        (await target.run(management.launcher, ['status', '--json'])).stdout,
+      );
+      const count = status.accountCount ?? status.accounts?.length ?? status.summary?.totalAccounts;
+      checks.push({
+        name: 'Account-Pool',
+        ok: true,
+        detail: count === undefined ? 'Status erreichbar' : `${count} Accounts`,
+      });
+    } catch (error) {
+      checks.push({ name: 'Proxy-CLI', ok: false, detail: error.message });
+    }
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${client.ports.client}/${client.healthCheck === 'legacy' ? '__websocket_auth_check__' : '__setup_health'}`,
+        { signal: AbortSignal.timeout(5000) },
+      );
+      const ready =
+        client.healthCheck === 'legacy'
+          ? response.status === 404
+          : response.ok && (await response.json()).ready === true;
+      checks.push({
+        name: 'Desktop-Verbindung',
+        ok: ready,
+        detail: `127.0.0.1:${client.ports.client}`,
+      });
+      await response.body?.cancel().catch(() => {});
+    } catch (error) {
+      checks.push({ name: 'Desktop-Verbindung', ok: false, detail: error.message });
+    }
+    for (const check of checks)
+      p.log[check.ok ? 'success' : 'warn'](`${check.name}: ${check.detail}`);
+    return { checks };
+  }
   const result = jsonResult(await new Target(client).worker('doctor'));
   for (const check of result.checks)
     p.log[check.ok ? 'success' : 'warn'](
@@ -747,7 +942,11 @@ export async function doctor(clientRoot) {
 }
 
 export async function menu(clientRoot) {
-  const existing = await readJson(path.join(clientRoot, 'client.json'), null);
+  const present =
+    (await readJson(path.join(clientRoot, 'client.json'), null)) ??
+    (await readJson(path.join(clientRoot, 'forwarder.json'), null));
+  const existing = present ? await loadClient(clientRoot) : null;
+  const external = existing?.configFile.endsWith('/forwarder.json');
   const choice = await select(
     'Codex Multi Auth',
     existing
@@ -760,8 +959,12 @@ export async function menu(clientRoot) {
           { value: 'remove', label: 'Account entfernen' },
           { value: 'configure', label: 'Installation ändern' },
           { value: 'doctor', label: 'Diagnose' },
-          { value: 'updates', label: 'Updates prüfen' },
-          { value: 'recover', label: 'Unterbrochene Wartung wiederherstellen' },
+          ...(external
+            ? [{ value: 'connect', label: 'Vorhandenen Docker-Proxy anbinden / CLI reparieren' }]
+            : [
+                { value: 'updates', label: 'Updates prüfen' },
+                { value: 'recover', label: 'Unterbrochene Wartung wiederherstellen' },
+              ]),
         ]
       : [
           { value: 'install', label: 'Neu installieren' },

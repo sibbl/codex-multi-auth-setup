@@ -22,8 +22,8 @@ async function replaceFile(filename, content, mode) {
   await fs.rename(temporary, filename);
 }
 
-export async function installLauncher(
-  client,
+async function installTerminalLauncher(
+  { name, content, root, reason },
   {
     home = os.homedir(),
     shell = process.env.SHELL ?? '',
@@ -33,21 +33,7 @@ export async function installLauncher(
   } = {},
 ) {
   const directory = path.join(home, '.local', 'bin');
-  const filename = path.join(directory, 'codex-ma-setup');
-  const entry = path.join(client.clientAppDir, 'bin', 'codex-ma-setup.mjs');
-  await fs.access(entry);
-  await fs.access(client.clientNode, fs.constants.X_OK);
-  const command = `${shellQuote(client.clientNode)} ${shellQuote(entry)}`;
-  const content = `#!/bin/sh
-# Managed by codex-multi-auth-setup.
-for argument do
-  case "$argument" in
-    --) break ;;
-    --client-root) exec ${command} "$@" ;;
-  esac
-done
-exec ${command} --client-root ${shellQuote(client.clientRoot)} "$@"
-`;
+  const filename = path.join(directory, name);
   let shellConfig;
   const shellConfigs = [];
   const shellChanges = [];
@@ -104,9 +90,7 @@ exec ${command} --client-root ${shellQuote(client.clientRoot)} "$@"
       }
     }
   }
-  const backup = sources.length
-    ? await backupFiles(client.clientRoot, sources, 'install global setup command')
-    : null;
+  const backup = sources.length ? await backupFiles(root, sources, reason) : null;
   if (launcherChanged) await replaceFile(filename, content, 0o755);
   for (const change of shellChanges) {
     let mode = 0o600;
@@ -118,4 +102,49 @@ exec ${command} --client-root ${shellQuote(client.clientRoot)} "$@"
     await replaceFile(change.target, change.content, mode);
   }
   return { path: filename, backup, shellConfig, shellConfigs, pathUpdated, warning };
+}
+
+export async function installLauncher(client, options) {
+  const entry = path.join(client.clientAppDir, 'bin', 'codex-ma-setup.mjs');
+  await fs.access(entry);
+  await fs.access(client.clientNode, fs.constants.X_OK);
+  const command = `${shellQuote(client.clientNode)} ${shellQuote(entry)}`;
+  const content = `#!/bin/sh
+# Managed by codex-multi-auth-setup.
+for argument do
+  case "$argument" in
+    --) break ;;
+    --client-root) exec ${command} "$@" ;;
+  esac
+done
+exec ${command} --client-root ${shellQuote(client.clientRoot)} "$@"
+`;
+  return installTerminalLauncher(
+    {
+      name: 'codex-ma-setup',
+      content,
+      root: client.clientRoot,
+      reason: 'install global setup command',
+    },
+    options,
+  );
+}
+
+export async function installProxyLauncher(config, options) {
+  const entry = path.join(config.appDir, 'bin', 'codex-multi-auth.mjs');
+  await fs.access(entry);
+  await fs.access(config.node, fs.constants.X_OK);
+  const content = `#!/bin/sh
+# Managed by codex-multi-auth-setup.
+exec ${shellQuote(config.node)} ${shellQuote(entry)} --root ${shellQuote(config.root)} -- "$@"
+`;
+  return installTerminalLauncher(
+    {
+      name: 'codex-multi-auth',
+      content,
+      root: config.root,
+      reason: 'install global proxy command',
+    },
+    options,
+  );
 }

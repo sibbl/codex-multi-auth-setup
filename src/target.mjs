@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { run, shellCommand, shellQuote } from './process.mjs';
 import { validHost } from './config.mjs';
+import { validateDockerManagement } from './docker.mjs';
 
 export function sshArguments(ssh, { interactive = false, batch = true } = {}) {
   if (!validHost(ssh.host)) throw new Error('Invalid SSH destination');
@@ -67,6 +68,20 @@ export class Target {
   }
   async verifyFallbackIdentity(ssh) {
     if (ssh.host === this.config.ssh.host) return;
+    if (this.config.management?.type === 'docker') {
+      const management = validateDockerManagement(this.config.management);
+      const identity = JSON.stringify([ssh.host, management.launcher, management.identity]);
+      if (this.verifiedIdentity === identity) return;
+      const result = await this.execute(
+        'ssh',
+        [...sshArguments(ssh), shellCommand(management.launcher, ['--setup-identity'])],
+        { interactive: false, timeoutMs: 15000, maxOutput: 65536 },
+      );
+      if (result.stdout.trim() !== management.identity)
+        throw new Error('Fallback points to a different installation; no action was sent');
+      this.verifiedIdentity = identity;
+      return;
+    }
     // Initial onboarding chooses its destination before an installation exists.
     // Public client configurations must prove the persisted installation identity.
     const freshInstall =

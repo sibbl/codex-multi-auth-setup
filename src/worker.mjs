@@ -25,6 +25,7 @@ import { run } from './process.mjs';
 import { stageProxy, stageCli, runUpdate, inspectManagedPackage, acquireLock } from './updater.mjs';
 import { installServices, serviceStatus } from './services.mjs';
 import { inspectVersions } from './doctor.mjs';
+import { installProxyLauncher } from './launcher.mjs';
 
 export const accountCommands = {
   list: ['list'],
@@ -361,10 +362,11 @@ export async function dispatch(action, root, payload = {}) {
   if (action === 'services') {
     if (config.systemService) await run('sudo', ['-v'], { interactive: true });
     return maintenance(config, 'background service installation', async () => {
+      const proxyLauncher = await installProxyLauncher(config);
       const result = await installServices(config, { role: 'server' });
       await backupFiles(root, [path.join(root, 'config.json')], 'mark initialized');
       await atomicJson(path.join(root, 'config.json'), { ...config, initialized: true });
-      return result;
+      return { ...result, proxyLauncher };
     });
   }
   if (action === 'updates')

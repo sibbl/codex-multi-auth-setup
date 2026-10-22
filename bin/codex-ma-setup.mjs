@@ -11,15 +11,15 @@ import {
   accountAction,
   updatesAction,
   doctor,
-  menu,
   loadClient,
 } from '../src/installer.mjs';
 
-import { poolAction, selectedPoolRoot } from '../src/pools.mjs';
+import { poolAction, poolMenu, selectedPoolRoot } from '../src/pools.mjs';
 
 const help = `Codex Multi Auth Setup
 
-  codex-ma-setup                         Geführtes Menü
+  codex-ma-setup                         Interaktives Pool-Menü
+  codex-ma-setup dashboard               Interaktives Pool-Menü
   codex-ma-setup install                 Lokal oder per SSH installieren
   codex-ma-setup connect                 Vorhandenen SSH-Proxy verbinden
   codex-ma-setup resume                  Unterbrochene Einrichtung fortsetzen
@@ -65,6 +65,7 @@ async function main() {
     throw new Error('--pool requires a name');
   const command = args.shift();
   if (command === 'pools') return poolAction(clientRoot, args);
+  if (command === 'dashboard' || !command) return poolMenu(clientRoot);
   const poolBase = clientRoot;
   if (pool && ['install', 'connect'].includes(command))
     throw new Error('Use pools create NAME to install an isolated pool');
@@ -85,8 +86,6 @@ async function main() {
       throw new Error('Der Einrichtungsdialog benötigt ein Terminal. Nutze --help für Befehle.');
   }
   switch (command) {
-    case undefined:
-      return menu(clientRoot);
     case 'install':
       return install(clientRoot);
     case 'connect':

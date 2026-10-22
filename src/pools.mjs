@@ -3,7 +3,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { atomicJson, readJson } from './config.mjs';
 import { backupFiles } from './backup.mjs';
-import { install, loadClient, waitForClient, writeDesktop } from './installer.mjs';
+import {
+  install,
+  loadClient,
+  waitForClient,
+  writeDesktop,
+  accountAction,
+  doctor,
+  configure,
+  resume,
+} from './installer.mjs';
+import { select, text, confirm, p } from './prompts.mjs';
 import { run } from './process.mjs';
 
 export function poolPaths(base, name) {
@@ -74,6 +84,7 @@ export async function seedPoolHome(destination, source) {
 
 export async function poolAction(base, args) {
   const [action, name, ...rest] = args;
+  if (!action || ['menu', 'dashboard'].includes(action)) return poolMenu(base);
   if (action === 'list') {
     const state = await registry(base);
     const entries = await fs
@@ -136,4 +147,101 @@ export async function poolAction(base, args) {
     });
   }
   throw new Error('pools: create | list | default | clear-default | run');
+}
+
+export async function availablePools(base) {
+  const state = await registry(base);
+  const entries = await fs
+    .readdir(path.join(base, 'pools'), { withFileTypes: true })
+    .catch((error) => {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    });
+  const pools = [];
+  for (const entry of entries.filter((item) => item.isDirectory())) {
+    const paths = poolPaths(base, entry.name);
+    const client = await readJson(path.join(paths.clientRoot, 'client.json'), null);
+    pools.push({
+      name: entry.name,
+      ...paths,
+      ready: Boolean(client && !client.pending),
+      default: state.defaultPool === entry.name,
+    });
+  }
+  return pools.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function poolMenu(base) {
+  if (!process.stdin.isTTY) throw new Error('Pool dashboard requires a terminal');
+  while (true) {
+    const pools = await availablePools(base);
+    const legacy = await readJson(path.join(base, 'client.json'), null);
+    const choice = await select('Pools verwalten', [
+      { value: ':create', label: 'Pool anlegen' },
+      ...pools.map((pool) => ({
+        value: pool.name,
+        label: `${pool.name}${pool.default ? ' (Standard)' : ''}${pool.ready ? '' : ' (unfertig)'}`,
+      })),
+      ...(legacy
+        ? [{ value: ':legacy', label: 'Bestehende Installation / bisherige Konten' }]
+        : []),
+      { value: ':exit', label: 'Beenden' },
+    ]);
+    if (choice === ':exit') return;
+    if (choice === ':create') {
+      const name = await text('Pool-Name (z. B. work oder personal)', '', (value) => {
+        try {
+          poolPaths(base, value);
+        } catch (error) {
+          return error.message;
+        }
+      });
+      const seed = await confirm(
+        'Konfiguration und History aus einem gestoppten Codex-Home kopieren?',
+        false,
+      );
+      const source = seed
+        ? await text('Absoluter Pfad des Snapshots', '', (value) =>
+            path.isAbsolute(value) ? undefined : 'Absoluten Pfad angeben',
+          )
+        : null;
+      await poolAction(base, ['create', name, ...(source ? ['--seed-from', source] : [])]);
+      continue;
+    }
+    const selected = pools.find((pool) => pool.name === choice);
+    const root = selected?.clientRoot ?? base;
+    const ready = selected ? selected.ready : !legacy.pending;
+    const action = await select(`Pool: ${selected?.name ?? 'bestehende Installation'}`, [
+      ...(!ready ? [{ value: 'resume', label: 'Einrichtung fortsetzen' }] : []),
+      { value: 'add', label: 'Account diesem Pool hinzufügen (Anmeldung)' },
+      { value: 'list', label: 'Zugeordnete Accounts anzeigen' },
+      { value: 'dashboard', label: 'Interaktives Account-Dashboard dieses Pools' },
+      { value: 'remove', label: 'Account aus diesem Pool entfernen' },
+      ...(ready
+        ? [
+            { value: 'stats', label: 'Usage / Account-Status' },
+            { value: 'configure', label: 'Routing / Updates konfigurieren' },
+            { value: 'doctor', label: 'Diagnose' },
+            ...(selected
+              ? [
+                  { value: ':default', label: 'Als Desktop-Standard wählen' },
+                  { value: ':run', label: 'Separate Codex-CLI starten' },
+                ]
+              : []),
+          ]
+        : []),
+      { value: ':back', label: 'Zurück' },
+    ]);
+    if (action === ':back') continue;
+    p.note(
+      'Accounts sind dem ausgewählten Pool zugeordnet. Ein Login in einem anderen Pool verschiebt oder entfernt keine bestehende Zuordnung. App-Login und Cloud-History bleiben getrennt.',
+      'Pool-Grenze',
+    );
+    if (action === ':default') await poolAction(base, ['default', selected.name]);
+    else if (action === ':run') await poolAction(base, ['run', selected.name]);
+    else if (action === 'configure') await configure(root);
+    else if (action === 'doctor') await doctor(root);
+    else if (action === 'resume') await resume(root);
+    else await accountAction(root, action);
+  }
 }

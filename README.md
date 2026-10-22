@@ -264,3 +264,17 @@ with `pools default OTHER`. Service names are hashed from installation roots, so
 pools do not replace each other's services. Disable the particular pool's services
 using the existing platform service tooling before archiving its directory;
 never delete a running pool or its credentials blindly.
+
+### Interactive pool dashboard
+
+Run `codex-ma-setup` or `codex-ma-setup dashboard` for the interactive pool menu
+(`codex-ma-setup pools` is equivalent). It lists named pools and an existing
+legacy installation separately. Choose a pool, then add/list/remove accounts,
+open its upstream account dashboard, configure its usage-aware routing, run
+diagnostics, choose it as the desktop default, or start its isolated CLI.
+Interrupted setups are marked and can be resumed. Account assignment is done by
+signing into the selected pool; accounts are never silently moved or copied
+between credential stores. To move an account, first sign it into the destination
+pool, verify it there, then remove it from the source pool if desired.
+The interactive account dashboard pauses only the selected proxy until you exit.
+The pool overview itself does not touch credentials or stop running services.

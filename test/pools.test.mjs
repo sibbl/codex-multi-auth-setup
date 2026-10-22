@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { poolPaths, seedPoolHome, selectedPoolRoot } from '../src/pools.mjs';
+import { poolPaths, seedPoolHome, selectedPoolRoot, availablePools } from '../src/pools.mjs';
 import { atomicJson, managementEnvironment } from '../src/config.mjs';
 
 test('pool paths reject traversal and isolate account stores', () => {
@@ -47,4 +47,26 @@ test('seed snapshots auth/config/history without sharing mutable files or live d
   await assert.rejects(seedPoolHome(dest, source), { code: 'EEXIST' });
   await fs.symlink('/tmp', path.join(source, 'skills'));
   await assert.rejects(seedPoolHome(path.join(base, 'unsafe'), source), /symlink/);
+});
+
+test('dashboard discovers ready and interrupted pools without exposing account credentials', async (t) => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'pool-menu-'));
+  t.after(() => fs.rm(base, { recursive: true, force: true }));
+  await atomicJson(path.join(poolPaths(base, 'work').clientRoot, 'client.json'), {
+    pending: false,
+    clientApiKey: 'private-fixture',
+  });
+  await atomicJson(path.join(poolPaths(base, 'personal').clientRoot, 'client.json'), {
+    pending: true,
+  });
+  await atomicJson(path.join(base, 'pools.json'), { schemaVersion: 1, defaultPool: 'work' });
+  const pools = await availablePools(base);
+  assert.deepEqual(
+    pools.map(({ name, ready, default: standard }) => ({ name, ready, standard })),
+    [
+      { name: 'personal', ready: false, standard: false },
+      { name: 'work', ready: true, standard: true },
+    ],
+  );
+  assert.ok(!JSON.stringify(pools).includes('private-fixture'));
 });

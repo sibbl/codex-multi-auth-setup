@@ -9,8 +9,24 @@ import {
   seedPoolHome,
   selectedPoolRoot,
   availablePools,
+  poolCliArguments,
 } from '../src/pools.mjs';
 import { atomicJson, managementEnvironment } from '../src/config.mjs';
+
+test('pool CLI uses proxy-owned authentication without importing a local login', () => {
+  const args = ['exec', 'A prompt with spaces', '--model', 'gpt-6.1-sol'];
+  const personal = poolCliArguments({ ports: { client: 64415 } }, args);
+  const work = poolCliArguments({ ports: { client: 64412 } }, args);
+  assert.ok(personal.includes('model_provider="codex_managed_pool"'));
+  assert.ok(personal.includes('model_providers.codex_managed_pool.requires_openai_auth=false'));
+  assert.ok(
+    personal.includes('model_providers.codex_managed_pool.base_url="http://127.0.0.1:64415/v1"'),
+  );
+  assert.ok(
+    work.includes('model_providers.codex_managed_pool.base_url="http://127.0.0.1:64412/v1"'),
+  );
+  assert.deepEqual(personal.slice(-args.length), args);
+});
 
 test('pool paths reject traversal and isolate account stores', () => {
   for (const name of ['../work', '', '-work', 'Work', 'work/x'])

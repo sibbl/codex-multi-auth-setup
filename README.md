@@ -222,6 +222,11 @@ npm start -- --pool work stats
 npm start -- --pool work doctor
 ```
 
+Pool CLI launches use a dedicated Responses provider pointed at the selected
+pool's local proxy. Authentication stays with the proxy's account pool; an empty
+CLI home does not require a separate ChatGPT login. These provider settings apply
+only to the launched process and do not rewrite desktop configuration or auth.
+
 Run setup commands in a terminal. Select distinct available ports when prompted.
 `pools run` uses a locally installed `codex` executable on PATH; installing the
 managed CLI is optional. Do not log out or replace the desktop login. Add every

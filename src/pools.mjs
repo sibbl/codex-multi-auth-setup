@@ -92,6 +92,25 @@ export async function seedPoolHome(destination, source) {
     });
 }
 
+export function poolCliArguments(client, args = []) {
+  // A base URL override alone still selects the built-in OpenAI provider,
+  // which requires a local login. The pool proxy owns authentication instead.
+  const provider = 'codex_managed_pool';
+  return [
+    '-c',
+    `model_provider="${provider}"`,
+    '-c',
+    `model_providers.${provider}.name="Managed Codex pool"`,
+    '-c',
+    `model_providers.${provider}.base_url="http://127.0.0.1:${client.ports.client}/v1"`,
+    '-c',
+    `model_providers.${provider}.wire_api="responses"`,
+    '-c',
+    `model_providers.${provider}.requires_openai_auth=false`,
+    ...args,
+  ];
+}
+
 export async function poolAction(base, args) {
   const [action, name, ...rest] = args;
   if (!action || ['menu', 'dashboard'].includes(action)) return poolMenu(base);
@@ -164,7 +183,7 @@ export async function poolAction(base, args) {
     await waitForClient(client);
     // Run locally even when the selected pool's proxy lives over SSH.
     // The client home contains this pool's endpoint, config, tools and history.
-    return run('codex', rest[0] === '--' ? rest.slice(1) : rest, {
+    return run('codex', poolCliArguments(client, rest[0] === '--' ? rest.slice(1) : rest), {
       interactive: true,
       env: { CODEX_HOME: client.codexHome },
     });

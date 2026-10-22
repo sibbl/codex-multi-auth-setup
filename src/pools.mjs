@@ -34,12 +34,22 @@ async function registry(base) {
   return readJson(registryFile(base), { schemaVersion: 1, defaultPool: null });
 }
 
+export async function selectedPoolName(base, name, command) {
+  return (
+    name ?? (!['install', 'connect'].includes(command) ? (await registry(base)).defaultPool : null)
+  );
+}
+
+async function locations(base, name) {
+  const paths = poolPaths(base, name);
+  return (await registry(base)).adoptedPool === name ? { ...paths, clientRoot: base } : paths;
+}
+
 export async function selectedPoolRoot(base, name, command) {
   // Legacy installs remain untouched. With a default, management commands select
   // that pool; installation always requires an explicit pool to avoid surprises.
-  const selected =
-    name ?? (!['install', 'connect'].includes(command) ? (await registry(base)).defaultPool : null);
-  return selected ? poolPaths(base, selected).clientRoot : base;
+  const selected = await selectedPoolName(base, name, command);
+  return selected ? (await locations(base, selected)).clientRoot : base;
 }
 
 export async function seedPoolHome(destination, source) {
@@ -86,35 +96,48 @@ export async function poolAction(base, args) {
   const [action, name, ...rest] = args;
   if (!action || ['menu', 'dashboard'].includes(action)) return poolMenu(base);
   if (action === 'list') {
-    const state = await registry(base);
-    const entries = await fs
-      .readdir(path.join(base, 'pools'), { withFileTypes: true })
-      .catch((error) => {
-        if (error.code === 'ENOENT') return [];
-        throw error;
-      });
-    for (const entry of entries.filter((item) => item.isDirectory())) {
-      const paths = poolPaths(base, entry.name);
-      const client = await readJson(path.join(paths.clientRoot, 'client.json'), null);
+    for (const pool of await availablePools(base))
       process.stdout.write(
-        `${entry.name}${state.defaultPool === entry.name ? ' (default)' : ''}${!client || client.pending ? ' (unfinished)' : ''}\n`,
+        `${pool.name}${pool.default ? ' (default)' : ''}${pool.ready ? '' : ' (unfinished)'}\n`,
       );
-    }
     return;
   }
   if (action === 'clear-default') {
     // Does not guess the old endpoint. Restore the reported backup explicitly.
     await backupFiles(base, [registryFile(base)], 'clear default pool');
-    await atomicJson(registryFile(base), { schemaVersion: 1, defaultPool: null });
+    await atomicJson(registryFile(base), { ...(await registry(base)), defaultPool: null });
     process.stdout.write(
       'Default selection cleared. Desktop endpoint is unchanged; restore its backup to disconnect.\n',
     );
     return;
   }
-  const paths = poolPaths(base, name);
+  const paths = await locations(base, name);
+  if (action === 'adopt') {
+    if (rest.length) throw new Error('pools adopt NAME');
+    const state = await registry(base);
+    if (state.adoptedPool && state.adoptedPool !== name)
+      throw new Error('Existing installation already belongs to another pool');
+    const client = await loadClient(base);
+    if (
+      !state.adoptedPool &&
+      (await fs.stat(path.join(base, 'pools', name)).catch((error) => {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      }))
+    )
+      throw new Error('A named pool already exists at this path');
+    await backupFiles(base, [registryFile(base)], 'name existing installation');
+    await atomicJson(registryFile(base), { ...state, adoptedPool: name });
+    process.stdout.write(
+      `Existing installation assigned to pool ${name}. Credentials, services and home unchanged.\n`,
+    );
+    return { clientRoot: base, pending: client.pending };
+  }
   if (action === 'create') {
     if (rest.length && (rest[0] !== '--seed-from' || rest.length !== 2))
       throw new Error('pools create NAME [--seed-from /absolute/codex-home]');
+    if ((await registry(base)).adoptedPool === name)
+      throw new Error('Pool already represents the existing installation');
     if (!process.stdin.isTTY) throw new Error('Pool setup requires a terminal');
     if (rest[0]) await seedPoolHome(paths.codexHome, rest[1]);
     return install(paths.clientRoot, { ...paths, pool: true });
@@ -127,11 +150,11 @@ export async function poolAction(base, args) {
     const desktopHome = process.env.CODEX_HOME
       ? path.resolve(process.env.CODEX_HOME)
       : path.join(os.homedir(), '.codex');
-    if (desktopHome === client.codexHome)
+    if (desktopHome === client.codexHome && (await registry(base)).adoptedPool !== name)
       throw new Error('Desktop home must be separate from pool home');
     const backup = await writeDesktop({ ...client, codexHome: desktopHome });
     await backupFiles(base, [registryFile(base)], 'select default pool');
-    await atomicJson(registryFile(base), { schemaVersion: 1, defaultPool: name });
+    await atomicJson(registryFile(base), { ...(await registry(base)), defaultPool: name });
     process.stdout.write(
       `Default pool: ${name}. Desktop backup: ${backup}. Restart the desktop app. Login/history unchanged.\n`,
     );
@@ -146,7 +169,7 @@ export async function poolAction(base, args) {
       env: { CODEX_HOME: client.codexHome },
     });
   }
-  throw new Error('pools: create | list | default | clear-default | run');
+  throw new Error('pools: create | adopt | list | default | clear-default | run');
 }
 
 export async function availablePools(base) {
@@ -158,14 +181,16 @@ export async function availablePools(base) {
       throw error;
     });
   const pools = [];
-  for (const entry of entries.filter((item) => item.isDirectory())) {
-    const paths = poolPaths(base, entry.name);
+  const names = new Set(entries.filter((item) => item.isDirectory()).map((item) => item.name));
+  if (state.adoptedPool) names.add(state.adoptedPool);
+  for (const name of names) {
+    const paths = await locations(base, name);
     const client = await readJson(path.join(paths.clientRoot, 'client.json'), null);
     pools.push({
-      name: entry.name,
+      name,
       ...paths,
       ready: Boolean(client && !client.pending),
-      default: state.defaultPool === entry.name,
+      default: state.defaultPool === name,
     });
   }
   return pools.sort((a, b) => a.name.localeCompare(b.name));
@@ -182,7 +207,7 @@ export async function poolMenu(base) {
         value: pool.name,
         label: `${pool.name}${pool.default ? ' (Standard)' : ''}${pool.ready ? '' : ' (unfertig)'}`,
       })),
-      ...(legacy
+      ...(legacy && !(await registry(base)).adoptedPool
         ? [{ value: ':legacy', label: 'Bestehende Installation / bisherige Konten' }]
         : []),
       { value: ':exit', label: 'Beenden' },
@@ -213,6 +238,9 @@ export async function poolMenu(base) {
     const ready = selected ? selected.ready : !legacy.pending;
     const action = await select(`Pool: ${selected?.name ?? 'bestehende Installation'}`, [
       ...(!ready ? [{ value: 'resume', label: 'Einrichtung fortsetzen' }] : []),
+      ...(!selected
+        ? [{ value: ':adopt', label: 'Bestehende Installation als benannten Pool übernehmen' }]
+        : []),
       { value: 'add', label: 'Account diesem Pool hinzufügen (Anmeldung)' },
       { value: 'list', label: 'Zugeordnete Accounts anzeigen' },
       { value: 'dashboard', label: 'Interaktives Account-Dashboard dieses Pools' },
@@ -237,7 +265,16 @@ export async function poolMenu(base) {
       'Accounts sind dem ausgewählten Pool zugeordnet. Ein Login in einem anderen Pool verschiebt oder entfernt keine bestehende Zuordnung. App-Login und Cloud-History bleiben getrennt.',
       'Pool-Grenze',
     );
-    if (action === ':default') await poolAction(base, ['default', selected.name]);
+    if (action === ':adopt') {
+      const name = await text('Pool-Name', '', (value) => {
+        try {
+          poolPaths(base, value);
+        } catch (error) {
+          return error.message;
+        }
+      });
+      await poolAction(base, ['adopt', name]);
+    } else if (action === ':default') await poolAction(base, ['default', selected.name]);
     else if (action === ':run') await poolAction(base, ['run', selected.name]);
     else if (action === 'configure') await configure(root);
     else if (action === 'doctor') await doctor(root);

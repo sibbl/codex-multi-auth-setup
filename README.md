@@ -278,3 +278,13 @@ between credential stores. To move an account, first sign it into the destinatio
 pool, verify it there, then remove it from the source pool if desired.
 The interactive account dashboard pauses only the selected proxy until you exit.
 The pool overview itself does not touch credentials or stop running services.
+
+### Name an existing installation without moving tokens
+
+`codex-ma-setup pools adopt work` registers the existing installation under a
+pool name without relocating credentials, changing its Codex home, copying tokens
+or restarting its services. Then use `codex-ma-setup pools default work` to make
+it the desktop default. This is also available from the existing-installation
+entry in the interactive dashboard. The adopted pool retains the original home
+and history; any additional pools use their own homes. Only one name may adopt
+the original installation, and an existing named pool cannot be overwritten.

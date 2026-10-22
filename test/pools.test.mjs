@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { poolPaths, seedPoolHome, selectedPoolRoot, availablePools } from '../src/pools.mjs';
+import {
+  poolAction,
+  poolPaths,
+  seedPoolHome,
+  selectedPoolRoot,
+  availablePools,
+} from '../src/pools.mjs';
 import { atomicJson, managementEnvironment } from '../src/config.mjs';
 
 test('pool paths reject traversal and isolate account stores', () => {
@@ -69,4 +75,30 @@ test('dashboard discovers ready and interrupted pools without exposing account c
     ],
   );
   assert.ok(!JSON.stringify(pools).includes('private-fixture'));
+});
+
+test('adopting an existing installation preserves credentials, services and default across updates', async (t) => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'pool-adopt-'));
+  t.after(() => fs.rm(base, { recursive: true, force: true }));
+  const client = {
+    pending: false,
+    codexHome: path.join(base, 'home'),
+    root: path.join(base, 'server'),
+  };
+  await atomicJson(path.join(base, 'client.json'), client);
+  await fs.mkdir(path.join(base, 'server'), { recursive: true });
+  const secret = path.join(base, 'server', 'accounts.json');
+  await fs.writeFile(secret, 'private fixture');
+  await poolAction(base, ['adopt', 'work']);
+  assert.equal(await selectedPoolRoot(base, 'work', 'stats'), base);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(base, 'client.json'), 'utf8')), client);
+  assert.equal(await fs.readFile(secret, 'utf8'), 'private fixture');
+  assert.deepEqual(
+    (await availablePools(base)).map((p) => [p.name, p.ready, p.clientRoot]),
+    [['work', true, base]],
+  );
+  await assert.rejects(poolAction(base, ['adopt', 'personal']), /already belongs/);
+  await assert.rejects(poolAction(base, ['create', 'work']), /already represents/);
+  await poolAction(base, ['clear-default']);
+  assert.equal(await selectedPoolRoot(base, 'work', 'stats'), base);
 });

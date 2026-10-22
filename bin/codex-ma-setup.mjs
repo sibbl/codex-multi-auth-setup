@@ -14,7 +14,7 @@ import {
   loadClient,
 } from '../src/installer.mjs';
 
-import { poolAction, poolMenu, selectedPoolRoot } from '../src/pools.mjs';
+import { poolAction, poolMenu, selectedPoolRoot, selectedPoolName } from '../src/pools.mjs';
 
 const help = `Codex Multi Auth Setup
 
@@ -32,7 +32,7 @@ const help = `Codex Multi Auth Setup
   codex-ma-setup doctor                  Verbindung und Modelle prüfen
   codex-ma-setup codex -- <args>          Verwaltete Codex-CLI auf dem Ziel starten
 
-  codex-ma-setup pools create|list|default|clear-default|run
+  codex-ma-setup pools create|adopt|list|default|clear-default|run
   --pool NAME                           Select isolated pool for any command
 
   --client-root /absoluter/pfad          Separate Installation / Client-Konfiguration
@@ -70,8 +70,8 @@ async function main() {
   if (pool && ['install', 'connect'].includes(command))
     throw new Error('Use pools create NAME to install an isolated pool');
   clientRoot = await selectedPoolRoot(clientRoot, pool, command);
-  if (command === 'codex' && clientRoot !== poolBase)
-    return poolAction(poolBase, ['run', pool ?? clientRoot.split('/').at(-2), ...args]);
+  const selected = await selectedPoolName(poolBase, pool, command);
+  if (command === 'codex' && selected) return poolAction(poolBase, ['run', selected, ...args]);
 
   if (['--help', '-h', 'help'].includes(command)) {
     process.stdout.write(help);

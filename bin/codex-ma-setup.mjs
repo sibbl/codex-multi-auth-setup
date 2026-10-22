@@ -34,7 +34,7 @@ const help = `Codex Multi Auth Setup
   codex-ma-setup doctor                  Verbindung und Modelle prüfen
   codex-ma-setup codex -- <args>          Verwaltete Codex-CLI auf dem Ziel starten
 
-  codex-ma-setup pools create|adopt|list|default|clear-default|run
+  codex-ma-setup pools create|adopt|list|home|default|clear-default|run
   --pool NAME                           Select isolated pool for any command
 
   --client-root /absoluter/pfad          Separate Installation / Client-Konfiguration

@@ -328,3 +328,20 @@ The standard flow runs upstream `login --preserve-selection`; device login adds
 `--device-auth`. With SSH, the browser must reach the callback on the proxy host;
 choose device code if callback forwarding is unavailable. Cancelling the selection
 does not pause the proxy or start a login.
+
+### Choosing a pool's CLI home
+
+Use the pool menu's **Codex-Home anzeigen / ändern**, or:
+
+```sh
+codex-ma-setup pools home work                 # show current home
+codex-ma-setup pools home work isolated        # pools/work/codex
+codex-ma-setup pools home work /absolute/path  # custom or existing home
+```
+
+This setting controls the local CLI home, including SSH-backed pools. It does not
+move or delete the previous home, copy history/settings, change proxy accounts,
+or change the Desktop default. New empty homes authenticate through the pool
+proxy without a separate login. Restart existing CLI/ACP sessions to use the new
+home. For an explicit settings/history snapshot, `pools create --seed-from` is
+available when creating a pool; live SQLite databases must not be copied.

@@ -118,3 +118,21 @@ test('adopting an existing installation preserves credentials, services and defa
   await poolAction(base, ['clear-default']);
   assert.equal(await selectedPoolRoot(base, 'work', 'stats'), base);
 });
+
+test('changing an adopted pool home preserves proxy settings and the old home', async (t) => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'pool-home-'));
+  t.after(() => fs.rm(base, { recursive: true, force: true }));
+  const old = path.join(base, 'desktop');
+  await fs.mkdir(old);
+  await fs.writeFile(path.join(old, 'auth.json'), 'untouched');
+  const client = { codexHome: old, serverCodexHome: old, ports: { client: 64412 } };
+  await atomicJson(path.join(base, 'client.json'), client);
+  await atomicJson(path.join(base, 'pools.json'), { adoptedPool: 'work', defaultPool: 'work' });
+  await poolAction(base, ['home', 'work', 'isolated']);
+  const updated = JSON.parse(await fs.readFile(path.join(base, 'client.json')));
+  assert.equal(updated.codexHome, poolPaths(base, 'work').codexHome);
+  assert.equal(updated.serverCodexHome, old);
+  assert.deepEqual(updated.ports, client.ports);
+  assert.equal(await fs.readFile(path.join(old, 'auth.json'), 'utf8'), 'untouched');
+  await assert.rejects(poolAction(base, ['home', 'work', '../relative']));
+});

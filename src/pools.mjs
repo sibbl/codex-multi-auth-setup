@@ -163,6 +163,31 @@ export async function poolAction(base, args) {
   }
   const client = await loadClient(paths.clientRoot);
   if (client.pending) throw new Error(`Pool unfinished: use --pool ${name} resume`);
+  if (action === 'home') {
+    if (!rest.length) {
+      process.stdout.write(`${client.codexHome}\n`);
+      return;
+    }
+    if (rest.length !== 1) throw new Error('pools home NAME [isolated | /absolute/path]');
+    const destination = rest[0] === 'isolated' ? paths.codexHome : rest[0];
+    if (!path.isAbsolute(destination) || /[\r\n\0]/.test(destination))
+      throw new Error('Codex home must be an absolute path without control characters');
+    const resolved = path.resolve(destination);
+    for (const pool of await availablePools(base)) {
+      if (pool.name === name) continue;
+      const other = await loadClient(pool.clientRoot);
+      if (other.codexHome && path.resolve(other.codexHome) === resolved)
+        throw new Error('Codex home already belongs to another pool');
+    }
+    await fs.mkdir(resolved, { recursive: true, mode: 0o700 });
+    const filename = path.join(paths.clientRoot, 'client.json');
+    const backup = await backupFiles(paths.clientRoot, [filename], 'change pool CLI home');
+    await atomicJson(filename, { ...client, codexHome: resolved });
+    process.stdout.write(
+      `Pool ${name} Codex home: ${resolved}\nPrevious home left unchanged: ${client.codexHome}\nSettings/history are not copied. Proxy accounts unchanged. Backup: ${backup}\n`,
+    );
+    return;
+  }
   if (action === 'default') {
     if (rest.length) throw new Error('pools default NAME');
     await waitForClient(client);
@@ -188,7 +213,7 @@ export async function poolAction(base, args) {
       env: { CODEX_HOME: client.codexHome },
     });
   }
-  throw new Error('pools: create | adopt | list | default | clear-default | run');
+  throw new Error('pools: create | adopt | list | home | default | clear-default | run');
 }
 
 export async function availablePools(base) {
@@ -274,6 +299,7 @@ export async function poolMenu(base) {
               ? [
                   { value: ':default', label: 'Als Desktop-Standard wählen' },
                   { value: ':run', label: 'Separate Codex-CLI starten' },
+                  { value: ':home', label: 'Codex-Home anzeigen / ändern' },
                 ]
               : []),
           ]
@@ -294,6 +320,23 @@ export async function poolMenu(base) {
         }
       });
       await poolAction(base, ['adopt', name]);
+    } else if (action === ':home') {
+      const client = await loadClient(root);
+      p.note(client.codexHome, 'Aktuelles Codex-Home');
+      const choice = await select('Codex-Home wählen (altes Verzeichnis bleibt unverändert)', [
+        { value: 'isolated', label: 'Eigenes Verzeichnis im Pool (empfohlen)' },
+        { value: 'custom', label: 'Eigenen absoluten Pfad angeben' },
+        { value: 'keep', label: 'Unverändert lassen' },
+      ]);
+      if (choice !== 'keep') {
+        const destination =
+          choice === 'custom'
+            ? await text('Absoluter Codex-Home-Pfad', '', (value) =>
+                path.isAbsolute(value) ? undefined : 'Absoluten Pfad angeben',
+              )
+            : 'isolated';
+        await poolAction(base, ['home', selected.name, destination]);
+      }
     } else if (action === ':default') await poolAction(base, ['default', selected.name]);
     else if (action === ':run') await poolAction(base, ['run', selected.name]);
     else if (action === 'configure') await configure(root);

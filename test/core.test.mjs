@@ -297,3 +297,32 @@ test('login choice accepts either explicit method, strips wrapper flags and reje
   await assert.rejects(chooseLogin(['--browser-auth', '--device-auth']), /ODER/);
   if (!process.stdin.isTTY) await assert.rejects(chooseLogin(), /Anmeldemethode wählen/);
 });
+
+test('login method is resolved before transport to legacy per-pool workers', async () => {
+  const target = new Target({
+    mode: 'local',
+    node: process.execPath,
+    root: '/tmp/pool',
+    appDir: '/tmp/manager',
+  });
+  const calls = [];
+  target.run = async (_node, args, options) => {
+    calls.push({ args, options });
+    return {};
+  };
+  for (const interactive of [true, false]) {
+    for (const loginMethod of ['browser', 'device']) {
+      await target.worker('accounts', { command: 'add', loginMethod, args: [] }, { interactive });
+      const call = calls.at(-1);
+      const payload = JSON.parse(
+        interactive ? Buffer.from(call.args.at(-1), 'base64url').toString() : call.options.input,
+      );
+      assert.equal(payload.command, 'proxy');
+      assert.deepEqual(payload.args, [
+        'login',
+        ...(loginMethod === 'device' ? ['--device-auth'] : []),
+        '--preserve-selection',
+      ]);
+    }
+  }
+});

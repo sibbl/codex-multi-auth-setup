@@ -224,7 +224,7 @@ async function configureTailscale(target, info, clientRoot, serverRoot, mode) {
   }
 }
 
-export async function install(clientRoot = defaultClientRoot()) {
+export async function install(clientRoot = defaultClientRoot(), options = {}) {
   p.intro('Codex Multi Auth · Einrichtung');
   const existingClient = await readJson(path.join(clientRoot, 'client.json'), null);
   if (existingClient?.pending) return resume(clientRoot);
@@ -236,9 +236,11 @@ export async function install(clientRoot = defaultClientRoot()) {
     throw new Error(
       'Nutze macOS, Linux oder WSL2. Native Windows-Dienste sind nicht implementiert.',
     );
-  const localHome = process.env.CODEX_HOME
-    ? path.resolve(process.env.CODEX_HOME)
-    : path.join(os.homedir(), '.codex');
+  const localHome =
+    options.codexHome ??
+    (process.env.CODEX_HOME
+      ? path.resolve(process.env.CODEX_HOME)
+      : path.join(os.homedir(), '.codex'));
   const backup = await backupFiles(
     clientRoot,
     [
@@ -250,14 +252,16 @@ export async function install(clientRoot = defaultClientRoot()) {
     'installation preflight',
   );
   p.log.info(`Konfiguration gesichert: ${backup}`);
-  const mode = await select(
-    'Wo soll der Account-Proxy laufen?',
-    [
-      { value: 'local', label: 'Lokal auf diesem Computer' },
-      { value: 'ssh', label: 'Auf NAS / Server per SSH' },
-    ],
-    'local',
-  );
+  const mode = options.pool
+    ? 'local'
+    : await select(
+        'Wo soll der Account-Proxy laufen?',
+        [
+          { value: 'local', label: 'Lokal auf diesem Computer' },
+          { value: 'ssh', label: 'Auf NAS / Server per SSH' },
+        ],
+        'local',
+      );
   const ssh = mode === 'ssh' ? await askSsh() : null;
   const target = new Target({ mode, ssh });
   if (mode === 'ssh') {
@@ -268,7 +272,7 @@ export async function install(clientRoot = defaultClientRoot()) {
     await target.trust();
   }
   const info = await busy('Zielsystem prüfen', () => target.inspect());
-  const root = await askLocation(info.home);
+  const root = options.serverRoot ?? (await askLocation(info.home));
   if (await target.exists(path.join(root, 'config.json')))
     throw new Error(
       'Dieser Server ist bereits eingerichtet. Nutze „connect“, um einen weiteren Computer zu verbinden.',
@@ -316,7 +320,9 @@ export async function install(clientRoot = defaultClientRoot()) {
       'Ein systemd-Benutzerdienst benötigt einen laufenden User-Manager.\nFür Betrieb nach Logout: „sudo loginctl enable-linger <Benutzer>“.',
       'Linux-Benutzerdienst',
     );
-  const desktop = await confirm('Codex Desktop auf diesem Computer mit dem Proxy verbinden?', true);
+  const desktop = options.pool
+    ? true
+    : await confirm('Codex Desktop auf diesem Computer mit dem Proxy verbinden?', true);
   let ports = await choosePorts();
   p.note(
     `Ziel: ${mode === 'ssh' ? ssh.host : 'dieser Computer'}\nOrdner: ${root}\nAccounts: ${strategy === 'sequential' ? 'Sequenziell' : 'Hybrid'}\nAutomatische Updates: ${updates.enabled ? `alle ${updates.intervalHours} h` : 'aus'}\nProxy-Wartezeit: ${updates.delayHours} h\nDesktop: ${desktop ? `127.0.0.1:${ports.client}` : 'unverändert'}`,
@@ -343,7 +349,7 @@ export async function install(clientRoot = defaultClientRoot()) {
     ports,
     systemService,
     serviceUser: info.username,
-    codexHome: path.join(info.home, '.codex'),
+    codexHome: options.pool ? path.join(root, 'cli-home') : path.join(info.home, '.codex'),
     clientApiKey: crypto.randomBytes(32).toString('hex'),
   };
   target.config = config;

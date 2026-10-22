@@ -199,3 +199,68 @@ Tests use temporary homes, fake upstream processes, real loopback HTTP/streaming
 This helper installs and manages its own deployment. It does not automatically migrate an arbitrary existing multi-auth installation, alter NAS-wide SSH policy, update Node/nginx/OS packages on a schedule, publish credentials, or share account pools through GitHub. Use fresh device sign-ins for the new pool.
 
 MIT licensed. Upstream `codex-multi-auth` remains separately maintained under its own license.
+
+## Isolated account pools (local)
+
+Pools reuse the existing supervised proxy, account manager and hybrid usage-aware
+scheduler. Each pool has its own credential store, runtime, ports, services,
+configuration, MCP/plugin settings and CLI history. There is **no cross-pool
+fallback**. Choose **Hybrid** in each setup dialog for usage-aware switching.
+Existing non-pool installations remain supported and are not migrated implicitly.
+
+```sh
+npm start -- pools create personal --seed-from /Users/you/.codex
+npm start -- pools create work
+npm start -- --pool personal accounts add
+npm start -- --pool work accounts add
+npm start -- pools list
+npm start -- pools default personal
+npm start -- pools run work -- "Explain this repository"
+# Equivalent pool-aware CLI command:
+npm start -- --pool work codex -- "Explain this repository"
+npm start -- --pool work stats
+npm start -- --pool work doctor
+```
+
+Run setup commands in a terminal. Select distinct available ports when prompted.
+`pools run` uses a locally installed `codex` executable on PATH; installing the
+managed CLI is optional. Do not log out or replace the desktop login. Add every
+additional model account through `--pool NAME accounts add`; copying auth.json
+only seeds the client login, it does not enroll accounts in the proxy store.
+
+`--seed-from` is optional and takes a **stopped, reviewed Codex home snapshot**.
+It copies config.toml, auth.json, history.jsonl, sessions, skills and plugins into
+a new private pool home, never into an existing home. Symlinks are refused. Live
+SQLite databases, sockets, caches and external credential/keychain stores are not
+copied; this is not a complete app backup or plugin credential migration. Close
+Codex before taking the snapshot. Copies are independent after creation, not
+ongoing synchronization. If a seed fails, preserve/rename its partial home before
+retrying; it is never silently overwritten. Do not seed personal information into
+a work pool unless intended.
+
+The default selection redirects the **existing desktop home's model endpoint**
+after probing the selected pool. It preserves app auth, history and tool settings.
+Restart the app afterwards. It does **not** switch desktop history/config to the
+pool's CLI home: separate full environments are selected with `pools run`. Dot or
+mobile only use this selection when their requests actually pass through this
+local endpoint; cloud execution is not covered. Accounts within one pool share
+the context/tools of its calling client, not the individual accounts' cloud histories.
+
+Without `--pool`, management commands use the chosen default; without a default,
+legacy behavior is unchanged. `install` and `connect` remain legacy commands;
+create isolated pools with `pools create`. An interrupted setup can be continued
+with `--pool NAME resume`. Pool state lives under the selected `--client-root` in
+`pools/NAME/{client,server,codex}`. Pool creation never redirects the existing
+`.codex` desktop home; choosing the default is a separate explicit command.
+
+### Rollback
+
+`pools default NAME` prints the desktop backup directory; keep it. To disconnect,
+close the app and restore **only config.toml** from that backup (consult its
+manifest for the original path). Do not restore old auth tokens over refreshed
+ones. Run `pools clear-default` to clear CLI default selection; this deliberately
+leaves the desktop endpoint unchanged. You can instead select another ready pool
+with `pools default OTHER`. Service names are hashed from installation roots, so
+pools do not replace each other's services. Disable the particular pool's services
+using the existing platform service tooling before archiving its directory;
+never delete a running pool or its credentials blindly.

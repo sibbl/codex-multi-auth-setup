@@ -1,3 +1,4 @@
+import { formatUsage } from './usage.mjs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -629,6 +630,15 @@ export async function configure(clientRoot = defaultClientRoot(), requested) {
 
 export async function accountAction(clientRoot, command, args = []) {
   const client = await loadClient(clientRoot);
+  if (command === 'usage') {
+    if (args.some((arg) => arg !== '--json'))
+      throw new Error('usage: only --json is supported; this command never redeems resets');
+    const report = jsonResult(await new Target(client).worker('usage-summary'));
+    process.stdout.write(
+      args.includes('--json') ? JSON.stringify(report, null, 2) + '\n' : formatUsage(report),
+    );
+    return;
+  }
   if (command === 'remove')
     p.note(
       'Der offizielle Proxy unterstützt keinen direkten „remove“-Unterbefehl.\nEs öffnet sich sein Account-Manager: Account auswählen, dann Löschen (D).',

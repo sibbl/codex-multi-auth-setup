@@ -247,7 +247,8 @@ export async function poolMenu(base) {
       { value: 'remove', label: 'Account aus diesem Pool entfernen' },
       ...(ready
         ? [
-            { value: 'stats', label: 'Usage / Account-Status' },
+            { value: 'stats', label: 'Account-Status' },
+            { value: 'usage', label: 'Usage / Bank Resets mit Ablaufzeiten (nur lesen)' },
             { value: 'configure', label: 'Routing / Updates konfigurieren' },
             { value: 'doctor', label: 'Diagnose' },
             ...(selected

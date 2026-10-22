@@ -319,6 +319,20 @@ export async function dispatch(action, root, payload = {}) {
   if (action === 'read') return publicConfig(config);
   if (action === 'resume') return initializeInternal(config, { resume: true });
   if (action === 'recover') return recover(config, payload);
+  if (action === 'usage-summary') {
+    return maintenance(config, 'read-only usage and bank-reset details', async () => {
+      const result = await run(
+        config.node,
+        [path.join(config.appDir, 'src/usage-reader.mjs'), root],
+        {
+          env: managementEnvironment(config),
+          cwd: root,
+          timeoutMs: 120000,
+        },
+      );
+      return JSON.parse(result.stdout);
+    });
+  }
   if (action === 'accounts') {
     const args = accountArguments(payload);
     const commandName = /^[a-z][a-z-]*$/.test(args[0]) ? args[0] : '(custom command)';

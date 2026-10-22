@@ -288,3 +288,22 @@ it the desktop default. This is also available from the existing-installation
 entry in the interactive dashboard. The adopted pool retains the original home
 and history; any additional pools use their own homes. Only one name may adopt
 the original installation, and an existing named pool cannot be overwritten.
+
+### Read-only usage, bank resets and expiry times
+
+`codex-ma-setup --pool work usage` (or `accounts usage`) reads the native Codex
+usage snapshot for every account in the selected pool. `--json` returns the same
+allowlisted report for scripts. The interactive pool dashboard also offers
+**Usage / Bank Resets mit Ablaufzeiten (nur lesen)**.
+
+Bank resets are the earned `rateLimitResetCredits` entries in the native protocol,
+not purchased balance credits. The report shows their available count and each
+provided expiry timestamp with local date, exact time and timezone. Missing,
+zero and capped/partial detail lists are distinguished; absence of details does
+not mean zero. Opaque credit IDs and authentication fields are not printed.
+The read RPC requests detail rows explicitly. It cannot call the consume RPC,
+redeem a credit, change account selection, or enable automatic redemption.
+The proxy pauses briefly while native usage is read, then resumes. Expired auth
+may be refreshed in the pool store without changing the desktop login.
+This reader currently requires the compatible native-usage modules shipped by
+the underlying proxy. Unavailable data is reported as unknown, never zero.

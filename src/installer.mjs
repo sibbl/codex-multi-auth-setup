@@ -384,14 +384,46 @@ export async function install(clientRoot = defaultClientRoot(), options = {}) {
   return finishOnboarding(client, target);
 }
 
+export async function chooseLogin(args = []) {
+  const device = args.includes('--device-auth');
+  const browser = args.includes('--browser-auth');
+  if (device && browser) throw new Error('Nur --device-auth ODER --browser-auth angeben.');
+  let loginMethod = device ? 'device' : browser ? 'browser' : undefined;
+  if (!loginMethod) {
+    if (!process.stdin.isTTY)
+      throw new Error(
+        'Anmeldemethode wählen: --device-auth oder --browser-auth (oder interaktiv im Terminal starten).',
+      );
+    loginMethod = await select('Wie möchtest du den Account anmelden?', [
+      {
+        value: 'browser',
+        label: 'Standard-Flow im Browser',
+        hint: 'OAuth mit lokaler Callback-Weiterleitung',
+      },
+      {
+        value: 'device',
+        label: 'Device-Code',
+        hint: 'Link öffnen und Gerätecode eingeben; auch für SSH',
+      },
+    ]);
+  }
+  p.note(
+    loginMethod === 'device'
+      ? 'Link öffnen und Gerätecode eingeben. Bei jedem Account den gewünschten Account wählen.'
+      : 'Standard-Browser-Anmeldung mit Callback auf dem Proxy-Rechner. Bei SSH muss der Callback vom Browser erreichbar sein; alternativ Device-Code wählen.',
+    loginMethod === 'device' ? 'Device-Code-Anmeldung' : 'Standard-Browser-Anmeldung',
+  );
+  return {
+    loginMethod,
+    args: args.filter((arg) => !['--device-auth', '--browser-auth'].includes(arg)),
+  };
+}
+
 async function finishOnboarding(client, target) {
   let add = await confirm('Jetzt einen Account anmelden?', true);
   while (add) {
-    p.note(
-      'Der offizielle Proxy-Login zeigt einen Link und Gerätecode.\nIm Browser mit dem gewünschten Account anmelden; bei jedem weiteren Account den richtigen Login wählen.',
-      'codex-multi-auth login --device-auth --preserve-selection',
-    );
-    await target.worker('accounts', { command: 'add' }, { interactive: true });
+    const login = await chooseLogin();
+    await target.worker('accounts', { command: 'add', ...login }, { interactive: true });
     add = await confirm('Weiteren Account hinzufügen?', false);
   }
   if (
@@ -639,6 +671,8 @@ export async function accountAction(clientRoot, command, args = []) {
     );
     return;
   }
+  const login = command === 'add' ? await chooseLogin(args) : {};
+  if (command === 'add') args = login.args;
   if (command === 'remove')
     p.note(
       'Der offizielle Proxy unterstützt keinen direkten „remove“-Unterbefehl.\nEs öffnet sich sein Account-Manager: Account auswählen, dann Löschen (D).',
@@ -649,7 +683,7 @@ export async function accountAction(clientRoot, command, args = []) {
       'Der Proxy pausiert für die Dauer der Account-Verwaltung.\nLaufende Anfragen dürfen vorher fertig werden.',
       'Account-Dateien schützen',
     );
-  const reference = `codex-multi-auth ${command === 'add' ? 'login --device-auth --preserve-selection' : command === 'remove' ? 'login' : command === 'stats' ? 'status' : command === 'proxy' ? '(Proxy-Befehl)' : command}`;
+  const reference = `codex-multi-auth ${command === 'add' ? `login ${login.loginMethod === 'device' ? '--device-auth ' : ''}--preserve-selection` : command === 'remove' ? 'login' : command === 'stats' ? 'status' : command === 'proxy' ? '(Proxy-Befehl)' : command}`;
   const structured =
     args.includes('--json') &&
     (['stats', 'list', 'usage'].includes(command) ||
@@ -675,7 +709,7 @@ export async function accountAction(clientRoot, command, args = []) {
     return;
   }
   p.log.info(`Weiterleitung an ${reference}.`);
-  await new Target(client).worker('accounts', { command, args }, { interactive: true });
+  await new Target(client).worker('accounts', { command, args, ...login }, { interactive: true });
 }
 
 export async function updatesAction(clientRoot, action) {

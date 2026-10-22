@@ -44,10 +44,14 @@ export function accountArguments(payload) {
       payload.args.some((value) => typeof value !== 'string' || value.includes('\0')))
   )
     throw new Error('Proxy arguments must be strings without NUL characters');
+  if (payload.loginMethod !== undefined && !['device', 'browser'].includes(payload.loginMethod))
+    throw new Error('Unknown login method');
+  const base =
+    payload.command === 'add' && payload.loginMethod === 'browser'
+      ? ['login', '--preserve-selection']
+      : accountCommands[payload.command];
   const args =
-    payload.command === 'proxy'
-      ? (payload.args ?? [])
-      : [...accountCommands[payload.command], ...(payload.args ?? [])];
+    payload.command === 'proxy' ? (payload.args ?? []) : [...base, ...(payload.args ?? [])];
   if (!args.length) throw new Error('Missing upstream proxy command');
   return args;
 }

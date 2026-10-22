@@ -26,6 +26,7 @@ const help = `Codex Multi Auth Setup
   codex-ma-setup recover                 Unterbrochene Wartung wiederherstellen
   codex-ma-setup configure               Adresse, Routing, Updates ändern
   codex-ma-setup accounts add|list|remove Offizielle Account-Verwaltung
+  codex-ma-setup accounts add --device-auth | --browser-auth
   codex-ma-setup usage                   Usage / Bank Resets und Ablaufzeiten (nur lesen)
   codex-ma-setup stats                   codex-multi-auth status
   codex-ma-setup proxy -- <command>      Beliebigen offiziellen Proxy-Befehl öffnen

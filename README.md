@@ -27,7 +27,7 @@ The wizard asks for:
 4. **Account selection:** sequential or hybrid. Upstream currently has no pure round-robin mode; hybrid means health/quota-aware selection, not round robin.
 5. **Optional automatic updates**, check interval, and proxy release age. Default: at least **48 hours** old; configurable from 0 to 8760 hours. The same rule applies to the first installation.
 6. **Optional managed Codex CLI.** Its stable releases have no additional age delay. Existing system/npm/Homebrew installations are left in place. A backed-up `~/.local/bin/codex` link is an explicit additional choice.
-7. **Account onboarding**, using the official device-login command. Add one or multiple accounts locally or over SSH; no callback-port forwarding required.
+7. **Account onboarding**, with a choice of standard browser OAuth or device-code login. Add one or multiple accounts locally or over SSH; no callback-port forwarding required.
 8. **Desktop configuration.** After a successful connection test, the wizard backs up and changes the local `openai_base_url` while preserving unrelated TOML and comments.
 
 When prompted at the end, **fully quit Codex Desktop and reopen it**. Then send a small request. Changing only the server's hostname/IP later normally needs no Desktop restart because the local endpoint stays the same.
@@ -85,7 +85,7 @@ Use `codex-ma-setup configure` for settings owned by this installer, such as SSH
 | `codex-ma-setup install`                | New local/SSH installation                                                        |
 | `codex-ma-setup connect`                | Connect another computer to an existing SSH installation                          |
 | `codex-ma-setup configure`              | Change SSH address/fallback/key, strategy, Tailscale, updates, or Desktop binding |
-| `codex-ma-setup accounts add`           | `codex-multi-auth login --device-auth --preserve-selection`                       |
+| `codex-ma-setup accounts add`           | Choose browser or device-code login; always preserves account selection           |
 | `codex-ma-setup accounts list`          | `codex-multi-auth list`                                                           |
 | `codex-ma-setup stats`                  | `codex-multi-auth status`                                                         |
 | `codex-ma-setup accounts usage`         | `codex-multi-auth usage`                                                          |
@@ -307,3 +307,19 @@ The proxy pauses briefly while native usage is read, then resumes. Expired auth
 may be refreshed in the pool store without changing the desktop login.
 This reader currently requires the compatible native-usage modules shipped by
 the underlying proxy. Unavailable data is reported as unknown, never zero.
+
+### Choose the account login flow
+
+`codex-ma-setup accounts add` asks which method to use every time, including
+onboarding and the pool menu. Choose **Standard browser flow** (OAuth callback)
+or **Device code**. For explicit/noninteractive selection:
+
+```sh
+codex-ma-setup --pool work accounts add --browser-auth
+codex-ma-setup --pool work accounts add --device-auth
+```
+
+The standard flow runs upstream `login --preserve-selection`; device login adds
+`--device-auth`. With SSH, the browser must reach the callback on the proxy host;
+choose device code if callback forwarding is unavailable. Cancelling the selection
+does not pause the proxy or start a login.

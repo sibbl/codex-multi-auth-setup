@@ -28,6 +28,18 @@ test('pool CLI uses proxy-owned authentication without importing a local login',
   assert.deepEqual(personal.slice(-args.length), args);
 });
 
+test('pool identity is visible in the provider without changing its auth or endpoint', () => {
+  for (const name of ['work', 'personal']) {
+    const args = poolCliArguments({ ports: { client: 65000 } }, ['resume', '--last'], name);
+    assert.ok(args.includes(`model_providers.codex_pool_${name}.name="Codex pool: ${name}"`));
+    assert.ok(
+      args.includes(`model_providers.codex_pool_${name}.base_url="http://127.0.0.1:65000/v1"`),
+    );
+    assert.deepEqual(args.slice(-2), ['resume', '--last']);
+  }
+  assert.throws(() => poolCliArguments({ ports: { client: 65000 } }, [], 'bad\\"name'));
+});
+
 test('pool paths reject traversal and isolate account stores', () => {
   for (const name of ['../work', '', '-work', 'Work', 'work/x'])
     assert.throws(() => poolPaths('/tmp/base', name));

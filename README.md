@@ -227,6 +227,13 @@ pool's local proxy. Authentication stays with the proxy's account pool; an empty
 CLI home does not require a separate ChatGPT login. These provider settings apply
 only to the launched process and do not rewrite desktop configuration or auth.
 
+Each launch prints the selected pool and proxy endpoint to stderr. Inside Codex,
+`/status` identifies the provider as `codex_pool_<name>` (display name:
+`Codex pool: <name>`). The launch banner shows its endpoint.
+This identifies the pool, not the rotating account selected by the proxy. Existing
+sessions must be restarted to pick up the label. Explicit Codex `-c` overrides
+can replace launch settings; `/status` is the authoritative check in that case.
+
 Run setup commands in a terminal. Select distinct available ports when prompted.
 `pools run` uses a locally installed `codex` executable on PATH; installing the
 managed CLI is optional. Do not log out or replace the desktop login. Add every

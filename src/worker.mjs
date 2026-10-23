@@ -64,8 +64,19 @@ async function control(config, action, timeoutMs = 30_000) {
     signal: AbortSignal.timeout(timeoutMs + 5000),
   });
   if (!response.ok) {
+    let detail = '';
+    if (action === 'probe') {
+      const report = await response.json().catch(() => null);
+      if (
+        typeof report?.error === 'string' &&
+        /^(Router probe returned \d{3}|Invalid router catalog|Router probe timed out|Model catalog probe requires a detectable native Codex version)$/.test(
+          report.error,
+        )
+      )
+        detail = `: ${report.error}`;
+    }
     const error = new Error(
-      `Runtime control ${action} returned ${response.status}; existing requests may still be active`,
+      `Runtime control ${action} returned ${response.status}${action === 'drain' ? '; requests may not have drained' : ''}${detail}`,
     );
     error.httpStatus = response.status;
     throw error;

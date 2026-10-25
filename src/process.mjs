@@ -26,9 +26,12 @@ export function run(executable, args = [], options = {}) {
       if (exceeded) return;
       exceeded = true;
       child.kill('SIGTERM');
-      killTimeout = setTimeout(() => child.kill('SIGKILL'), 2000);
+      killTimeout = setTimeout(() => child.kill('SIGKILL'), options.killGraceMs ?? 2000);
       killTimeout.unref();
     };
+    const onAbort = () => terminate();
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    if (options.signal?.aborted) terminate();
     if (!interactive) {
       child.stdout.on('data', (data) => {
         if (exceeded) return;
@@ -51,11 +54,13 @@ export function run(executable, args = [], options = {}) {
       timeout.unref();
     }
     child.once('error', (error) => {
+      options.signal?.removeEventListener('abort', onAbort);
       clearTimeout(timeout);
       clearTimeout(killTimeout);
       reject(error);
     });
     child.once('close', (code, signal) => {
+      options.signal?.removeEventListener('abort', onAbort);
       clearTimeout(timeout);
       clearTimeout(killTimeout);
       if (spawnCallbackError) return reject(spawnCallbackError);

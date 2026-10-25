@@ -1,4 +1,6 @@
 import http from 'node:http';
+import { atomicJson } from './config.mjs';
+import { maintenanceStatus } from './maintenance-status.mjs';
 import { inspectVersions } from './doctor.mjs';
 import { spawn } from 'node:child_process';
 import { timingSafeEqual } from 'node:crypto';
@@ -131,6 +133,32 @@ export async function startServer(config) {
   let activeRequests = 0;
   let restartTimer;
   let closePromise;
+  let maintenanceTimer;
+  let observationRunning = false;
+  let lastMaintenance;
+  async function observeMaintenance() {
+    if (observationRunning || closing) return;
+    observationRunning = true;
+    try {
+      const report = await maintenanceStatus(root);
+      const signature = JSON.stringify([report.state, report.operationId, report.phase]);
+      if (signature !== lastMaintenance) {
+        await atomicJson(path.join(root, 'maintenance-state/observed.json'), {
+          ...report,
+          observedAt: new Date().toISOString(),
+        });
+        if (report.state !== 'idle' || lastMaintenance !== undefined)
+          console.error(
+            `Maintenance ${report.state}: ${report.phase ?? 'idle'}; run doctor for details`,
+          );
+        lastMaintenance = signature;
+      }
+    } catch {
+      console.error('Maintenance observation failed; inspect doctor');
+    } finally {
+      observationRunning = false;
+    }
+  }
   const sockets = new Set();
   const upstreamRequests = new Set();
   const status = () => ({
@@ -267,9 +295,9 @@ export async function startServer(config) {
     }
     const pathname = req.url?.split('?')[0];
     if (pathname === '/__setup_health' && req.method === 'GET') {
-      return json(res, ready ? 200 : 503, {
+      return json(res, ready && !maintenance() && !closing ? 200 : 503, {
         service: marker,
-        ready,
+        ready: ready && !maintenance() && !closing,
         maintenance: maintenance(),
         installationId: config.installationId,
       });
@@ -279,7 +307,8 @@ export async function startServer(config) {
       if (req.method !== 'POST') return json(res, 405, { error: 'POST required' });
       try {
         const request = await body(req);
-        if (request.action === 'status') return json(res, 200, status());
+        if (request.action === 'status')
+          return json(res, 200, { ...status(), maintenanceReport: await maintenanceStatus(root) });
         if (request.action === 'drain') {
           if (!maintenance()) return json(res, 409, { error: 'Maintenance lock required' });
           return json(res, (await drain(request.timeoutMs ?? 30000)) ? 200 : 409, status());
@@ -393,6 +422,8 @@ export async function startServer(config) {
       closing = true;
       ready = false;
       clearTimeout(restartTimer);
+      clearInterval(maintenanceTimer);
+      while (observationRunning) await sleep(10);
       const stopped = new Promise((resolve) => server.close(resolve));
       const deadline = Date.now() + 5000;
       while (activeRequests && Date.now() < deadline) await sleep(25);
@@ -410,6 +441,9 @@ export async function startServer(config) {
       server.listen(config.ports.gateway, '127.0.0.1', resolve);
     });
     await launchChild();
+    await observeMaintenance();
+    maintenanceTimer = setInterval(observeMaintenance, 10_000);
+    maintenanceTimer.unref();
   } catch (error) {
     await close();
     throw error;

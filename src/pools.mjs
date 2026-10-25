@@ -351,3 +351,23 @@ export async function poolMenu(base) {
     else await accountAction(root, action);
   }
 }
+
+export async function doctorPools(base, { json = false } = {}) {
+  const pools = await availablePools(base);
+  const reports = [];
+  for (const pool of pools) {
+    try {
+      const result = await doctor(pool.clientRoot, { quiet: json });
+      reports.push({ pool: pool.name, ok: result.checks.every((check) => check.ok), ...result });
+    } catch (error) {
+      reports.push({ pool: pool.name, ok: false, error: error.message });
+    }
+  }
+  if (!pools.length) throw new Error('No registered pools');
+  if (json) process.stdout.write(JSON.stringify({ pools: reports }, null, 2) + '\n');
+  else
+    for (const report of reports)
+      process.stdout.write(`${report.pool}: ${report.ok ? 'available' : 'attention required'}\n`);
+  if (reports.some((report) => !report.ok)) process.exitCode = 1;
+  return reports;
+}

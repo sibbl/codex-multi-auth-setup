@@ -244,7 +244,11 @@ test('account process observes its PID durably recorded before command execution
     process.stdout.write(JSON.stringify({ owner: owner.pid, recorded: owner.childPid, actual: process.pid }));
   `,
   );
-  const result = await dispatch('accounts', setup.root, { command: 'list', interactive: false });
+  const result = await dispatch('accounts', setup.root, {
+    command: 'proxy',
+    args: ['check'],
+    interactive: false,
+  });
   const report = JSON.parse(result.stdout);
   assert.equal(report.owner, process.pid);
   assert.equal(report.recorded, report.actual);

@@ -2,7 +2,7 @@
 
 A guided terminal installer for [codex-multi-auth](https://github.com/ndycode/codex-multi-auth). Run the account proxy on your own computer or an SSH server/NAS, connect Codex Desktop, and keep the proxy and an optional managed Codex CLI updated.
 
-The wizard uses [`@clack/prompts`](https://github.com/bombshell-dev/clack). Prompts are in German; upstream account screens use the proxy's own interface. This is an independent setup helper, not an OpenAI product or a fork of the account manager.
+The wizard uses [`@clack/prompts`](https://github.com/bombshell-dev/clack). All setup prompts, help text, and diagnostics are in English; upstream account screens use the proxy's own interface. This is an independent setup helper, not an OpenAI product or a fork of the account manager.
 
 ## Start
 
@@ -17,7 +17,21 @@ npm start
 
 The repository is public; cloning does not require a GitHub account. Nothing is published to npm by this project.
 
-For the short commands below, run `npm install --global .` once. Without a global installation, use `npm start -- stats` (or another command) from the checkout. Background services use their own installed copy and do not depend on the checkout remaining open.
+Setup automatically installs `codex-ma-setup` into `~/.local/bin`, using its own
+installed manager and Node runtime. All subcommands then work from any directory.
+If needed, setup adds that directory to your interactive zsh, bash, or fish
+configuration; open a new terminal afterward. Other shells show a manual PATH
+instruction. Existing launcher and shell files are backed up before changes.
+
+The launcher remembers the client profile used during setup. Use
+`codex-ma-setup --client-root /absolute/path stats` to choose another profile.
+Before setup, run commands with `npm start -- stats` (or another command) from the
+checkout. Background services and the installed terminal command use their own
+copy and do not depend on the checkout remaining open.
+
+On the proxy host, setup also installs `codex-multi-auth` into `~/.local/bin`.
+For managed installations this command goes through the same account-maintenance
+lock and backups as the setup helper, using the installed proxy and account pool.
 
 The wizard asks for:
 
@@ -61,7 +75,7 @@ flowchart LR
 
 The gateway adds the private router key and forwards streamed responses back along the same path. The upstream router owns account selection, token refresh, and failover between eligible accounts. Sequential mode follows account order; hybrid mode considers account health and quota. Available models and account eligibility still determine which account can serve a request.
 
-The background services keep running after the setup terminal closes, subject to the platform's login requirements described below. Account management and updates use a maintenance lock: existing requests drain, the router pauses, then it resumes after the operation. This keeps two processes from refreshing the same account tokens simultaneously. The optional update scheduler checks releases separately and applies the configured release-age delay.
+The background services keep running after the setup terminal closes, subject to the platform's login requirements described below. Account mutations and updates use a maintenance lock: existing requests drain, the router pauses, then it resumes after the operation. This keeps two processes from refreshing the same account tokens simultaneously. The optional update scheduler checks releases separately and applies the configured release-age delay.
 
 ### Proxy-specific settings
 
@@ -79,27 +93,45 @@ Use `codex-ma-setup configure` for settings owned by this installer, such as SSH
 
 ## Daily commands
 
-| Command                                 | Purpose / upstream command                                                        |
-| --------------------------------------- | --------------------------------------------------------------------------------- |
-| `codex-ma-setup`                        | Guided menu                                                                       |
-| `codex-ma-setup install`                | New local/SSH installation                                                        |
-| `codex-ma-setup connect`                | Connect another computer to an existing SSH installation                          |
-| `codex-ma-setup configure`              | Change SSH address/fallback/key, strategy, Tailscale, updates, or Desktop binding |
-| `codex-ma-setup accounts add`           | Choose browser or device-code login; always preserves account selection           |
-| `codex-ma-setup accounts list`          | `codex-multi-auth list`                                                           |
-| `codex-ma-setup stats`                  | `codex-multi-auth status`                                                         |
-| `codex-ma-setup accounts usage`         | `codex-multi-auth usage`                                                          |
-| `codex-ma-setup accounts remove`        | Opens `codex-multi-auth login`; select account, then Delete (`D`)                 |
-| `codex-ma-setup proxy -- limits --json` | Passes arguments unchanged to the official proxy CLI                              |
-| `codex-ma-setup proxy -- --help`        | Official proxy command help                                                       |
-| `codex-ma-setup codex -- --version`     | Run the separately managed Codex CLI on the selected target                       |
-| `codex-ma-setup doctor`                 | Runtime, catalog, service, installation versions, and client connection           |
-| `codex-ma-setup resume`                 | Continue interrupted onboarding without resetting accounts                        |
-| `codex-ma-setup recover`                | Explicit recovery of abandoned maintenance; never restores old OAuth tokens       |
+| Command                                   | Purpose / upstream command                                                              |
+| ----------------------------------------- | --------------------------------------------------------------------------------------- |
+| `codex-ma-setup`                          | Guided menu                                                                             |
+| `codex-ma-setup install`                  | New local/SSH installation                                                              |
+| `codex-ma-setup connect`                  | Connect another computer to an existing SSH installation                                |
+| `codex-ma-setup connect --container NAME` | Bind an existing Docker router to the active forwarder profile and install its host CLI |
+| `codex-ma-setup configure`                | Change SSH address/fallback/key, strategy, Tailscale, updates, or Desktop binding       |
+| `codex-ma-setup accounts add`             | `codex-multi-auth login --device-auth --preserve-selection`                             |
+| `codex-ma-setup accounts list`            | `codex-multi-auth list`                                                                 |
+| `codex-ma-setup stats`                    | `codex-multi-auth status`                                                               |
+| `codex-ma-setup accounts usage`           | `codex-multi-auth usage`                                                                |
+| `codex-ma-setup accounts remove`          | Opens `codex-multi-auth login`; select account, then Delete (`D`)                       |
+| `codex-ma-setup proxy -- limits --json`   | Passes arguments unchanged to the official proxy CLI                                    |
+| `codex-ma-setup proxy -- --help`          | Official proxy command help                                                             |
+| `codex-ma-setup codex -- --version`       | Run the separately managed Codex CLI on the selected target                             |
+| `codex-ma-setup doctor`                   | Runtime, catalog, service, installation versions, and client connection                 |
+| `codex-ma-setup resume`                   | Continue interrupted onboarding without resetting accounts                              |
+| `codex-ma-setup recover`                  | Explicit recovery of abandoned maintenance; never restores old OAuth tokens             |
+
+Use `accounts add --device-auth` or `--browser-auth` to choose the login transport.
 
 Account helpers always use the installed upstream tool and its actual account store. There is no second OAuth implementation, made-up `remove` command, or copied account-selection algorithm. The official interactive account manager owns deletion and confirmation.
 
-Account management pauses the router for the duration of the command after current requests drain. A browser login can therefore keep the proxy paused until that login completes or is cancelled. This prevents the router and account tool from refreshing the same token concurrently. If a request cannot drain in time, the operation stops rather than interrupting it. Try again when the proxy is quiet.
+For managed installations, plain `stats`, `list`, and their `--json` variants use a local selection snapshot without pausing or refreshing tokens. Other account commands pause the router for the duration
+of the command after current requests drain. A browser login can therefore keep
+the proxy paused until that login completes or is cancelled. This prevents the
+router and account tool from refreshing the same token concurrently. If a request
+cannot drain in time, the operation stops rather than interrupting it. Try again
+when the proxy is quiet.
+
+For an adopted Docker router, `status`, `list` (also with `--json`), help, and
+version run inside the existing container without stopping it. Other commands
+take a host-side maintenance lock, gracefully stop the router, back up its existing
+account and Codex directories, and use a temporary container with the same image,
+mounted directories, environment paths, and user. The same shell command removes
+that temporary container and restarts the router on success, failure, or a handled
+signal. If a CLI container cannot be removed, the router remains stopped with its
+lock retained to prevent concurrent account-token writes; inspect that failure
+before recovering. This helper does not take over Docker Compose or its updates.
 
 See the [upstream command reference](https://github.com/ndycode/codex-multi-auth/blob/main/docs/reference/commands.md) for available arguments. Index conventions may differ between JSON and interactive commands; this helper does not translate indices.
 
@@ -160,6 +192,58 @@ Use the actual port from your installation. Check SSH configuration before reloa
 Tailscale fallback preserves the encrypted SSH connection. It does not expose an unauthenticated HTTP proxy to the LAN or Tailnet. Browser-origin requests and non-loopback Host headers are rejected by the compatibility gateway.
 
 ## Backups and files
+
+### Forwarder configuration
+
+The shared connector is `src/forwarder.mjs`. Managed installations start it with
+`--root CLIENT_ROOT`, reading `CLIENT_ROOT/client.json`. That file controls
+`mode` (`local` or `ssh`), `ports.client` (Desktop listener), `ports.gateway`
+(gateway on the proxy host), `ports.tunnel` (local SSH tunnel), and `ssh` options
+(`host`, optional `fallbackHost`, `port`, `identityFile`, `hostKeyAlias`). SSH
+destinations include the username, for example `user@server.example`.
+
+For a standalone connector to an existing gateway, copy
+[`examples/forwarder.json`](examples/forwarder.json) to a private location such as
+`~/.config/codex-multi-auth-setup/forwarder.json`, edit its values, and start:
+
+```bash
+node src/forwarder.mjs --config /absolute/path/to/forwarder.json
+```
+
+Use this same command in your background service. Forwarder and management CLI
+read the same active profile: `client.json` for a managed installation, or the
+existing `forwarder.json` for an adopted Docker router. Having both files in one
+client directory is rejected instead of silently choosing different settings.
+Restart the connector after changing its forwarding settings.
+When changing `ports.client`, also update Desktop's `openai_base_url` to
+`http://127.0.0.1:CLIENT_PORT` and fully restart Desktop. In `local` mode the
+connector reaches the local loopback gateway directly; `ssh` options and
+`ports.tunnel` are not required.
+
+The default `healthCheck: "setup"` requires this installer's owned health response
+and verifies `installationId` when present. For an existing legacy compatibility
+gateway only, explicitly select `healthCheck: "legacy"`: this checks for HTTP 404
+at `/__websocket_auth_check__`. This checks reachability without proving installation
+identity, so it cannot be combined with `installationId`. There is no automatic
+fallback to the legacy check. LAN and Tailscale fallback routes must still lead to
+the same trusted proxy host.
+
+To attach management to an existing Docker router, run:
+
+```sh
+codex-ma-setup connect --container YOUR_ROUTER_CONTAINER
+codex-ma-setup stats
+```
+
+This discovers the existing package, Node executable and account paths inside
+the container. It installs `codex-multi-auth` on the proxy host, and saves the
+management settings in the same `forwarder.json` already used by the connector.
+It creates no second account pool and does not reinstall or restart your connector
+or Docker services. SSH fallback management verifies the installed host launcher's
+identity before sending an action. For an adopted router, `stats`, `accounts`,
+`proxy`, `configure` (SSH/Desktop), and `doctor` are available; setup-managed
+updates, runtime recovery, and the separately managed Codex CLI still require a
+managed installation.
 
 Default client metadata: `~/.config/codex-multi-auth-setup/client.json`. Default server directory: `~/.local/share/codex-multi-auth-setup`. You can select a NAS storage directory instead. Use `--client-root /absolute/path` before `--` to manage a separate client profile.
 
@@ -352,3 +436,13 @@ or change the Desktop default. New empty homes authenticate through the pool
 proxy without a separate login. Restart existing CLI/ACP sessions to use the new
 home. For an explicit settings/history snapshot, `pools create --seed-from` is
 available when creating a pool; live SQLite databases must not be copied.
+
+## Maintenance visibility and availability
+
+Use `codex-ma-setup doctor --all` (or `--all --json`) to check every registered pool, including an adopted default installation. These checks do not start maintenance or send inference requests. A healthy router behind a maintenance lock is reported as unavailable, not as a successful readiness check. For end-to-end verification, send a small explicitly chosen Codex prompt through each pool home; this consumes normal account usage.
+
+Managed account/config operations record an operation ID, owner PID, phase and timestamps in `maintenance.lock/owner.json` and retain the last operation in `maintenance-state/operation.json`. The runtime observes transitions every ten seconds in `maintenance-state/observed.json` and logs active or abandoned maintenance. Doctor distinguishes live workers, surviving account children and abandoned operations; it never unlocks a live or uncertain owner. A process killed with SIGKILL can still require explicit `recover`: detection is not permission to overwrite account state.
+
+Handled SIGINT/SIGTERM cancels the tracked account subprocess, waits for it to stop, and attempts to resume the router. If resuming fails, the lock remains with a recovery-required phase. Recovery preserves current OAuth tokens and only releases the lock after confirmed router readiness. Journals omit command arguments, tokens and upstream response bodies.
+
+Docker management records phases and timestamps in `maintenance.json` under its host-side management state directory. Failed restarts or cleanup retain the maintenance lock and are reported by doctor; no Docker/NAS services are enabled by installing this feature.

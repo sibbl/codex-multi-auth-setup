@@ -329,3 +329,23 @@ test('catalog probe reports missing client version instead of issuing an unversi
     error: 'Model catalog probe requires a detectable native Codex version',
   });
 });
+
+test('readiness fails during maintenance even when router process remains healthy', async (t) => {
+  const { root, url, control } = await fixture(t);
+  await mkdir(path.join(root, 'maintenance.lock'));
+  await writeFile(
+    path.join(root, 'maintenance.lock/owner.json'),
+    JSON.stringify({
+      pid: 99999999,
+      reason: 'upstream login',
+      createdAt: new Date().toISOString(),
+    }),
+  );
+  const health = await fetch(`${url}/__setup_health`);
+  assert.equal(health.status, 503);
+  assert.equal((await health.json()).ready, false);
+  const report = await (await control('status')).json();
+  assert.equal(report.ready, true);
+  assert.equal(report.maintenanceReport.state, 'abandoned');
+  assert.equal(report.maintenanceReport.requiresRecovery, true);
+});

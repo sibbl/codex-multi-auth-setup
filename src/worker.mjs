@@ -25,6 +25,14 @@ import { run } from './process.mjs';
 import { stageProxy, stageCli, runUpdate, inspectManagedPackage, acquireLock } from './updater.mjs';
 import { installServices, serviceStatus } from './services.mjs';
 import { inspectVersions } from './doctor.mjs';
+import { installProxyLauncher } from './launcher.mjs';
+import {
+  maintenanceStatus,
+  maintenanceRecord,
+  newMaintenance,
+  accountSnapshot,
+  snapshotCommand,
+} from './maintenance-status.mjs';
 
 export const accountCommands = {
   list: ['list'],
@@ -84,7 +92,7 @@ async function control(config, action, timeoutMs = 30_000) {
   return response.json();
 }
 
-async function maintenance(config, reason, operation) {
+export async function maintenance(config, reason, operation) {
   const lock = path.join(config.root, 'maintenance.lock');
   try {
     await fs.mkdir(lock, { mode: 0o700 });
@@ -99,52 +107,63 @@ async function maintenance(config, reason, operation) {
   let paused = false;
   let result;
   let operationError;
+  let owner = newMaintenance(reason);
+  const controller = new AbortController();
+  let interrupted = false;
+  const interrupt = () => {
+    interrupted = true;
+    controller.abort();
+  };
+  process.on('SIGTERM', interrupt);
+  process.on('SIGINT', interrupt);
+  const record = async (phase, extra) => {
+    const saved = await readJson(path.join(lock, 'owner.json'), owner);
+    owner = await maintenanceRecord(config.root, { ...owner, ...saved }, phase, extra);
+  };
   try {
-    await atomicJson(path.join(lock, 'owner.json'), {
-      pid: process.pid,
-      reason,
-      createdAt: new Date().toISOString(),
-    });
-    if (config.initialized) {
-      paused = true;
+    try {
+      await record('draining');
+      if (config.initialized) {
+        paused = true;
+        try {
+          await control(config, 'pause');
+        } catch (error) {
+          if ([400, 401, 403, 404, 405, 409].includes(error.httpStatus)) paused = false;
+          throw error;
+        }
+      }
+      controller.signal.throwIfAborted();
+      await record('running');
+      const backup = await backupFiles(config.root, serverConfigFiles(config), reason);
+      result = await operation(backup, controller.signal);
+      controller.signal.throwIfAborted();
+    } catch (error) {
+      operationError = error;
+    }
+    if (paused) {
       try {
-        await control(config, 'pause');
+        await record('resuming');
+        const status = await control(config, 'reload', 90_000);
+        if (status.ready !== true) throw new Error('Runtime readiness not confirmed');
       } catch (error) {
-        // Known rejections happen before stopping the child. A lost response is
-        // uncertain: attempt reload before releasing the account-ownership lock.
-        if ([400, 401, 403, 404, 405, 409].includes(error.httpStatus)) paused = false;
-        throw error;
+        await record('recovery-required', { requiresRecovery: true });
+        const failure = new Error(
+          'Runtime could not resume. Maintenance remains locked to protect accounts. Run doctor and recover.',
+          { cause: error },
+        );
+        if (operationError) failure.operationError = operationError;
+        throw failure;
       }
     }
-    const backup = await backupFiles(config.root, serverConfigFiles(config), reason);
-    result = await operation(backup);
-  } catch (error) {
-    operationError = error;
+    await record(operationError ? 'failed' : 'completed', { requiresRecovery: false });
+    await fs.rm(lock, { recursive: true, force: true });
+    if (operationError) throw operationError;
+    return result;
+  } finally {
+    process.removeListener('SIGTERM', interrupt);
+    process.removeListener('SIGINT', interrupt);
+    if (interrupted) process.exitCode = 143;
   }
-  if (paused) {
-    try {
-      await control(config, 'reload', 90_000);
-    } catch (error) {
-      const previousOwner = await readJson(path.join(lock, 'owner.json'), {});
-      await atomicJson(path.join(lock, 'owner.json'), {
-        ...previousOwner,
-        pid: process.pid,
-        reason,
-        createdAt: previousOwner.createdAt ?? new Date().toISOString(),
-        requiresRecovery: true,
-        error: error.message,
-      });
-      const failure = new Error(
-        `Runtime could not resume. Maintenance remains locked to protect accounts. Run doctor and repair the service before recovery: ${error.message}`,
-        { cause: error },
-      );
-      if (operationError) failure.operationError = operationError;
-      throw failure;
-    }
-  }
-  await fs.rm(lock, { recursive: true, force: true });
-  if (operationError) throw operationError;
-  return result;
 }
 
 async function selectInitialPackage(root, kind, selected) {
@@ -309,10 +328,12 @@ async function recover(config, payload) {
       serverConfigFiles(config),
       'recover account/config maintenance',
     );
+    await maintenanceRecord(config.root, current, 'recovering');
     await control(config, 'drain');
     const status = await control(config, 'reload', 90_000);
     if (status.ready !== true)
       throw new Error('Runtime did not confirm readiness; recovery lock retained');
+    await maintenanceRecord(config.root, current, 'recovered', { requiresRecovery: false });
     await fs.rm(lock, { recursive: true });
     const directory = await fs.open(config.root, 'r');
     try {
@@ -350,8 +371,22 @@ export async function dispatch(action, root, payload = {}) {
   }
   if (action === 'accounts') {
     const args = accountArguments(payload);
+    if (snapshotCommand(args)) {
+      const snapshot = await accountSnapshot(root);
+      return {
+        code: 0,
+        stdout: args.includes('--json')
+          ? JSON.stringify(snapshot) + '\n'
+          : snapshot.accounts
+              .map(
+                (a) =>
+                  `${a.index}. ${a.email ?? '(unnamed)'}${a.pinned ? ' [pinned]' : ''}${a.active ? ' [active]' : ''}`,
+              )
+              .join('\n') + '\nSource: local snapshot; no token refresh.\n',
+      };
+    }
     const commandName = /^[a-z][a-z-]*$/.test(args[0]) ? args[0] : '(custom command)';
-    return maintenance(config, `upstream ${commandName}`, async (backup) => {
+    return maintenance(config, `upstream ${commandName}`, async (backup, signal) => {
       process.stderr.write(
         `Backup: ${backup}\nUpstream: codex-multi-auth ${commandName} (${args.length - 1} additional arguments)\n`,
       );
@@ -363,6 +398,7 @@ export async function dispatch(action, root, payload = {}) {
         config.node,
         [path.join(root, 'current-proxy', 'scripts', 'codex-multi-auth.js'), ...args],
         {
+          signal,
           interactive: payload.interactive !== false,
           env: managementEnvironment(config),
           cwd: root,
@@ -390,10 +426,11 @@ export async function dispatch(action, root, payload = {}) {
   if (action === 'services') {
     if (config.systemService) await run('sudo', ['-v'], { interactive: true });
     return maintenance(config, 'background service installation', async () => {
+      const proxyLauncher = await installProxyLauncher(config);
       const result = await installServices(config, { role: 'server' });
       await backupFiles(root, [path.join(root, 'config.json')], 'mark initialized');
       await atomicJson(path.join(root, 'config.json'), { ...config, initialized: true });
-      return result;
+      return { ...result, proxyLauncher };
     });
   }
   if (action === 'updates')
@@ -435,7 +472,11 @@ export async function dispatch(action, root, payload = {}) {
     ];
     try {
       const status = await control(config, 'status');
-      checks.push({ name: 'Runtime', ok: status.ready === true, detail: status });
+      checks.push({
+        name: 'Runtime',
+        ok: status.ready === true && status.maintenance !== true,
+        detail: status,
+      });
     } catch (error) {
       checks.push({ name: 'Runtime', ok: false, detail: error.message });
     }
@@ -458,6 +499,12 @@ export async function dispatch(action, root, payload = {}) {
       checks.push({ name: 'Managed Codex CLI', ok: !config.updates.cli, detail: 'Not installed' });
     }
     checks.push(...(await inspectVersions(config)));
+    const maintenanceReport = await maintenanceStatus(root);
+    checks.push({
+      name: 'Maintenance',
+      ok: maintenanceReport.state === 'idle',
+      detail: maintenanceReport,
+    });
     const updateStatus = await readJson(path.join(root, 'maintenance-state', 'status.json'), null);
     const maintenanceState = await readJson(
       path.join(root, 'maintenance.lock', 'owner.json'),
@@ -471,6 +518,8 @@ export async function dispatch(action, root, payload = {}) {
       checks,
       updates: updateStatus,
       maintenance: maintenanceState,
+      maintenanceReport,
+      lastOperation: await readJson(path.join(root, 'maintenance-state/operation.json'), null),
       updateRecoveryRequired: Boolean(updateTransaction),
       config: publicConfig(config),
     };

@@ -14,47 +14,55 @@ import {
   loadClient,
 } from '../src/installer.mjs';
 
-import { poolAction, poolMenu, selectedPoolRoot, selectedPoolName } from '../src/pools.mjs';
+import {
+  poolAction,
+  poolMenu,
+  selectedPoolRoot,
+  selectedPoolName,
+  doctorPools,
+} from '../src/pools.mjs';
 
 const help = `Codex Multi Auth Setup
 
-  codex-ma-setup                         Interaktives Pool-Menü
-  codex-ma-setup dashboard               Interaktives Pool-Menü
-  codex-ma-setup install                 Lokal oder per SSH installieren
-  codex-ma-setup connect                 Vorhandenen SSH-Proxy verbinden
-  codex-ma-setup resume                  Unterbrochene Einrichtung fortsetzen
-  codex-ma-setup recover                 Unterbrochene Wartung wiederherstellen
-  codex-ma-setup configure               Adresse, Routing, Updates ändern
-  codex-ma-setup accounts add|list|remove Offizielle Account-Verwaltung
+  codex-ma-setup                         Guided menu
+  codex-ma-setup install                 Install locally or over SSH
+  codex-ma-setup connect                 Connect an existing SSH proxy
+  codex-ma-setup connect --container NAME Connect an existing Docker proxy to the forwarder profile
+  codex-ma-setup resume                  Resume interrupted setup
+  codex-ma-setup recover                 Recover interrupted maintenance
+  codex-ma-setup configure               Change address, routing and updates
+  codex-ma-setup accounts add|list|remove Official account management
+  codex-ma-setup dashboard               Interactive pool menu
   codex-ma-setup accounts add --device-auth | --browser-auth
-  codex-ma-setup usage                   Usage / Bank Resets und Ablaufzeiten (nur lesen)
+  codex-ma-setup usage                   Read-only usage and reset expirations
   codex-ma-setup stats                   codex-multi-auth status
-  codex-ma-setup proxy -- <command>      Beliebigen offiziellen Proxy-Befehl öffnen
+  codex-ma-setup proxy -- <command>      Run any official proxy command
   codex-ma-setup updates enable|disable|configure|check|run|status
-  codex-ma-setup doctor                  Verbindung und Modelle prüfen
-  codex-ma-setup codex -- <args>          Verwaltete Codex-CLI auf dem Ziel starten
+  codex-ma-setup doctor                  Check connection, models and maintenance
+  codex-ma-setup doctor --all [--json]    Check every registered pool without pausing
+  codex-ma-setup codex -- <args>          Run the managed Codex CLI on the target
 
   codex-ma-setup pools create|adopt|list|home|default|clear-default|run
-  --pool NAME                           Select isolated pool for any command
+  --pool NAME                           Select isolated pool
 
-  --client-root /absoluter/pfad          Separate Installation / Client-Konfiguration
-  --help                                Diese Hilfe
+  --client-root /absolute/path           Separate installation / client configuration
+  --help                                Show this help
 
-Accounts bleiben beim Proxy-Tool. „remove“ öffnet dessen offiziellen Account-Manager.
-Round-Robin wird upstream nicht unterstützt; angeboten werden sequenziell und hybrid.
+Accounts are managed by the proxy tool. "remove" opens its official account manager.
+Round-robin is unsupported upstream; sequential and hybrid are available.
 `;
 
 async function main() {
   process.umask(0o077);
   const [major, minor] = process.versions.node.split('.').map(Number);
-  if (major < 22 || (major === 22 && minor < 19)) throw new Error('Node.js >=22.19 erforderlich.');
+  if (major < 22 || (major === 22 && minor < 19)) throw new Error('Node.js >=22.19 is required.');
   const args = process.argv.slice(2);
   let clientRoot = defaultClientRoot();
   const index = args.indexOf('--client-root');
   if (index !== -1 && (args.indexOf('--') === -1 || index < args.indexOf('--'))) {
     clientRoot = args[index + 1];
     if (!clientRoot?.startsWith('/') || /[\r\n\0]/.test(clientRoot))
-      throw new Error('--client-root benötigt einen absoluten Pfad.');
+      throw new Error('--client-root requires an absolute path.');
     args.splice(index, 2);
   }
   const poolIndex = args.indexOf('--pool');
@@ -66,6 +74,11 @@ async function main() {
   if (poolIndex !== -1 && (delimiter === -1 || poolIndex < delimiter) && !pool)
     throw new Error('--pool requires a name');
   const command = args.shift();
+  if (command === 'doctor' && args.includes('--all')) {
+    if (pool || args.some((arg) => !['--all', '--json'].includes(arg)))
+      throw new Error('doctor --all [--json] cannot select a single pool');
+    return doctorPools(clientRoot, { json: args.includes('--json') });
+  }
   if (command === 'pools') return poolAction(clientRoot, args);
   if (command === 'dashboard' || !command) return poolMenu(clientRoot);
   const poolBase = clientRoot;
@@ -83,15 +96,20 @@ async function main() {
     process.stdout.write('0.1.0\n');
     return;
   }
-  if (['install', 'connect', 'resume', 'recover', 'configure'].includes(command) || !command) {
+  const containerConnect = command === 'connect' && args[0] === '--container' && args.length === 2;
+  if (
+    (['install', 'connect', 'resume', 'recover', 'configure'].includes(command) || !command) &&
+    !containerConnect
+  ) {
     if (!process.stdin.isTTY)
-      throw new Error('Der Einrichtungsdialog benötigt ein Terminal. Nutze --help für Befehle.');
+      throw new Error('Interactive setup requires a terminal. Use --help to see commands.');
   }
   switch (command) {
     case 'install':
       return install(clientRoot);
     case 'connect':
-      return connect(clientRoot);
+      if (args.length && !containerConnect) throw new Error('connect: --container NAME');
+      return connect(clientRoot, containerConnect ? { container: args[1] } : {});
     case 'resume':
       return resume(clientRoot);
     case 'recover':
@@ -116,14 +134,20 @@ async function main() {
       return accountAction(clientRoot, 'proxy', args[0] === '--' ? args.slice(1) : args);
     case 'updates':
       return updatesAction(clientRoot, args[0] ?? 'configure');
-    case 'codex':
-      return new Target(await loadClient(clientRoot)).worker(
+    case 'codex': {
+      const client = await loadClient(clientRoot);
+      if (client.management?.type === 'docker' || client.configFile.endsWith('/forwarder.json'))
+        throw new Error(
+          'A managed Codex CLI is not configured for the existing Docker proxy. Use proxy for proxy commands.',
+        );
+      return new Target(client).worker(
         'codex',
         { args: args[0] === '--' ? args.slice(1) : args },
         { interactive: true },
       );
+    }
     default:
-      throw new Error(`Unbekannter Befehl: ${command}. Nutze --help.`);
+      throw new Error(`Unknown command: ${command}. Use --help.`);
   }
 }
 
@@ -131,7 +155,7 @@ main().catch((error) => {
   if (error instanceof Cancelled) p.cancel(error.message);
   else {
     p.log.error(error.message);
-    p.log.info('Backups bleiben erhalten. Diagnose: codex-ma-setup doctor');
+    p.log.info('Backups are preserved. Run diagnostics: codex-ma-setup doctor');
   }
   process.exitCode = error instanceof Cancelled ? 130 : 1;
 });

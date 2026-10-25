@@ -13,7 +13,7 @@ export async function installTailscale(target, info, root) {
     const brew = await target.run('sh', ['-c', 'command -v brew || true']);
     if (!brew.stdout.trim())
       throw new Error(
-        'Tailscale auf macOS benötigt Homebrew oder die offizielle App: https://tailscale.com/download/mac',
+        'Tailscale on macOS requires Homebrew or the official app: https://tailscale.com/download/mac',
       );
     await target.run(brew.stdout.trim(), ['install', '--cask', 'tailscale'], { interactive: true });
     return {
@@ -23,7 +23,7 @@ export async function installTailscale(target, info, root) {
     };
   }
   if (info.platform !== 'linux')
-    throw new Error('Tailscale-Installation unterstützt Linux und macOS.');
+    throw new Error('Tailscale installation supports Linux and macOS.');
   const backup = path.join(
     root,
     'backups',

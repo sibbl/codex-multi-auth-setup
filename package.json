@@ -20,6 +20,7 @@
   "files": [
     "bin",
     "src",
+    "examples",
     "README.md",
     "LICENSE"
   ],

@@ -4,13 +4,22 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { validHost } from './config.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function sshArguments(config, host) {
-  if (typeof host !== 'string' || !host || host.startsWith('-') || /[\s\0]/u.test(host))
-    throw new Error('Invalid SSH destination');
+  if (!validHost(host)) throw new Error('Invalid SSH destination');
   const ssh = config.ssh || {};
+  if (ssh.port !== undefined && (!Number.isInteger(ssh.port) || ssh.port < 1 || ssh.port > 65535))
+    throw new Error('Invalid SSH port');
+  for (const option of ['identityFile', 'hostKeyAlias']) {
+    if (
+      ssh[option] !== undefined &&
+      (typeof ssh[option] !== 'string' || /[\r\n\0]/.test(ssh[option]))
+    )
+      throw new Error('Invalid SSH option');
+  }
   const args = [
     '-N',
     '-T',
@@ -44,11 +53,23 @@ export function sshArguments(config, host) {
   return args;
 }
 
-async function health(port, installationId) {
+async function health(port, config) {
+  const legacy = config.healthCheck === 'legacy';
   return new Promise((resolve) => {
     const request = http.get(
-      { host: '127.0.0.1', port, path: '/__setup_health', timeout: 1000 },
+      {
+        host: '127.0.0.1',
+        port,
+        path: legacy ? '/__websocket_auth_check__' : '/__setup_health',
+        timeout: 1000,
+      },
       (response) => {
+        response.on('error', () => resolve(false));
+        if (legacy) {
+          response.on('end', () => resolve(response.statusCode === 404));
+          response.resume();
+          return;
+        }
         let data = '';
         response.on('data', (chunk) => {
           data += chunk;
@@ -61,13 +82,12 @@ async function health(port, installationId) {
               response.statusCode === 200 &&
                 report.service === 'codex-multi-auth-setup' &&
                 report.ready === true &&
-                (!installationId || report.installationId === installationId),
+                (!config.installationId || report.installationId === config.installationId),
             );
           } catch {
             resolve(false);
           }
         });
-        response.on('error', () => resolve(false));
       },
     );
     request.on('timeout', () => request.destroy());
@@ -78,6 +98,10 @@ async function health(port, installationId) {
 export async function startForwarder(config) {
   if (!['local', 'ssh'].includes(config.mode))
     throw new Error('Forwarder mode must be local or ssh');
+  if (config.healthCheck !== undefined && !['setup', 'legacy'].includes(config.healthCheck))
+    throw new Error('Forwarder healthCheck must be setup or legacy');
+  if (config.healthCheck === 'legacy' && config.installationId)
+    throw new Error('Legacy health check cannot verify installationId');
   for (const name of ['gateway', 'client', ...(config.mode === 'ssh' ? ['tunnel'] : [])]) {
     if (
       !Number.isInteger(config.ports[name]) ||
@@ -158,7 +182,7 @@ export async function startForwarder(config) {
     let routeIndex = 0;
     while (!closing) {
       if (config.mode === 'local') {
-        ready = await health(targetPort, config.installationId);
+        ready = await health(targetPort, config);
         await sleep(500);
         continue;
       }
@@ -176,7 +200,7 @@ export async function startForwarder(config) {
       });
       const deadline = Date.now() + 12000;
       while (!closing && !exited && Date.now() < deadline) {
-        if (await health(targetPort, config.installationId)) {
+        if (await health(targetPort, config)) {
           ready = true;
           break;
         }
@@ -187,7 +211,7 @@ export async function startForwarder(config) {
       while (!closing && !exited && ready) {
         await sleep(1000);
         if (closing || exited) break;
-        failures = (await health(targetPort, config.installationId)) ? 0 : failures + 1;
+        failures = (await health(targetPort, config)) ? 0 : failures + 1;
         if (failures >= 3) ready = false;
       }
       ready = false;
@@ -220,12 +244,12 @@ export async function startForwarder(config) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  const index = process.argv.indexOf('--root');
   try {
-    if (index < 0 || !process.argv[index + 1]) throw new Error('Usage: forwarder.mjs --root ROOT');
-    const config = JSON.parse(
-      await readFile(path.join(process.argv[index + 1], 'client.json'), 'utf8'),
-    );
+    const args = process.argv.slice(2);
+    if (args.length !== 2 || !['--root', '--config'].includes(args[0]) || !args[1])
+      throw new Error('Usage: forwarder.mjs --root ROOT | --config FILE');
+    const filename = args[0] === '--root' ? path.join(args[1], 'client.json') : args[1];
+    const config = JSON.parse(await readFile(filename, 'utf8'));
     const forwarder = await startForwarder(config);
     for (const signal of ['SIGINT', 'SIGTERM'])
       process.once(signal, () => forwarder.close().then(() => process.exit(0)));

@@ -1,0 +1,13 @@
+{
+  "mode": "ssh",
+  "ports": {
+    "client": 64412,
+    "tunnel": 64415,
+    "gateway": 64414
+  },
+  "ssh": {
+    "host": "user@server.example",
+    "port": 22
+  },
+  "healthCheck": "setup"
+}

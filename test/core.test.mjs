@@ -215,8 +215,12 @@ test('Account failure resumes runtime; failed resume retains explicit recovery l
     const { action } = JSON.parse(input);
     calls.push(action);
     if (action === 'pause' && dropPauseResponse) return response.destroy();
-    if (action === 'reload' && failReload) response.writeHead(500).end('{}');
-    else response.writeHead(200, { 'content-type': 'application/json' }).end('{}');
+    if (action === 'reload' && failReload)
+      response.writeHead(500).end(JSON.stringify({ ready: true }));
+    else
+      response
+        .writeHead(200, { 'content-type': 'application/json' })
+        .end(JSON.stringify({ ready: true }));
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -244,14 +248,14 @@ test('Account failure resumes runtime; failed resume retains explicit recovery l
   await fs.mkdir(scripts, { recursive: true });
   await fs.writeFile(path.join(scripts, 'codex-multi-auth.js'), 'process.exit(17);');
   await assert.rejects(
-    dispatch('accounts', root, { command: 'list', interactive: false }),
+    dispatch('accounts', root, { command: 'proxy', args: ['check'], interactive: false }),
     /exited with 17/,
   );
   assert.deepEqual(calls, ['pause', 'reload']);
   await assert.rejects(fs.stat(path.join(root, 'maintenance.lock')), { code: 'ENOENT' });
   dropPauseResponse = true;
   await assert.rejects(
-    dispatch('accounts', root, { command: 'list', interactive: false }),
+    dispatch('accounts', root, { command: 'proxy', args: ['check'], interactive: false }),
     /fetch failed/,
   );
   assert.deepEqual(calls.slice(-2), ['pause', 'reload']);
@@ -259,7 +263,7 @@ test('Account failure resumes runtime; failed resume retains explicit recovery l
   dropPauseResponse = false;
   failReload = true;
   await assert.rejects(
-    dispatch('accounts', root, { command: 'list', interactive: false }),
+    dispatch('accounts', root, { command: 'proxy', args: ['check'], interactive: false }),
     /Maintenance remains locked/,
   );
   const owner = JSON.parse(
@@ -267,7 +271,7 @@ test('Account failure resumes runtime; failed resume retains explicit recovery l
   );
   assert.equal(owner.requiresRecovery, true);
   await assert.rejects(
-    dispatch('accounts', root, { command: 'list', interactive: false }),
+    dispatch('accounts', root, { command: 'proxy', args: ['check'], interactive: false }),
     /Another update/,
   );
 });

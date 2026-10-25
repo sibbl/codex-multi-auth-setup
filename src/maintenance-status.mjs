@@ -37,10 +37,14 @@ export async function maintenanceStatus(root) {
 }
 
 export async function maintenanceRecord(root, owner, phase, extra = {}) {
-  const next = { ...owner, ...extra, phase, updatedAt: new Date().toISOString() };
+  const operationId = /^[a-f0-9-]{36}$/.test(owner.operationId ?? '')
+    ? owner.operationId
+    : randomUUID();
+  const next = { ...owner, ...extra, operationId, phase, updatedAt: new Date().toISOString() };
   // Keep credentials, command arguments and upstream error bodies out of the journal.
   await atomicJson(path.join(root, 'maintenance.lock/owner.json'), next);
   await atomicJson(path.join(root, 'maintenance-state/operation.json'), next);
+  await atomicJson(path.join(root, 'maintenance-state/operations', operationId + '.json'), next);
   return next;
 }
 

@@ -10,6 +10,7 @@ import {
   writeDesktop,
   accountAction,
   doctor,
+  menu,
   configure,
   resume,
 } from './installer.mjs';
@@ -247,6 +248,7 @@ export async function availablePools(base) {
 }
 
 export async function poolMenu(base) {
+  if (await readJson(path.join(base, 'forwarder.json'), null)) return menu(base);
   if (!process.stdin.isTTY) throw new Error('Pool dashboard requires a terminal');
   while (true) {
     const pools = await availablePools(base);
@@ -358,7 +360,11 @@ export async function doctorPools(base, { json = false } = {}) {
   for (const pool of pools) {
     try {
       const result = await doctor(pool.clientRoot, { quiet: json });
-      reports.push({ pool: pool.name, ok: result.checks.every((check) => check.ok), ...result });
+      reports.push({
+        pool: pool.name,
+        ok: result.checks.every((check) => check.optional || check.ok),
+        ...result,
+      });
     } catch (error) {
       reports.push({ pool: pool.name, ok: false, error: error.message });
     }

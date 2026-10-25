@@ -13,6 +13,7 @@ async function main() {
     args: args.length ? args : ['--help'],
     interactive: true,
   });
+  if (result.stdout) process.stdout.write(result.stdout);
   process.exitCode = result.code;
 }
 

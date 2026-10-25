@@ -2,6 +2,7 @@ import http from 'node:http';
 import { atomicJson } from './config.mjs';
 import { maintenanceStatus } from './maintenance-status.mjs';
 import { inspectVersions } from './doctor.mjs';
+import { run } from './process.mjs';
 import { spawn } from 'node:child_process';
 import { timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -37,7 +38,21 @@ async function body(req) {
 async function probe(config) {
   const checks = await inspectVersions(config);
   const daemon = checks.find((check) => check.name === 'Native Codex daemon')?.detail;
-  const version = daemon?.runningVersion || daemon?.selectedVersion;
+  let version = daemon?.runningVersion || daemon?.selectedVersion;
+  if (!version) {
+    try {
+      const result = await run(path.join(config.root, 'current-cli/bin/codex'), ['--version'], {
+        env: config.codexHome ? { CODEX_HOME: config.codexHome } : {},
+        timeoutMs: 5000,
+        maxOutput: 65536,
+      });
+      version = /^codex-cli (\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?)\s*$/.exec(
+        result.stdout.trim(),
+      )?.[1];
+    } catch {
+      /* Retain the explicit unavailable diagnostic below. */
+    }
+  }
   if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/.test(version))
     throw new Error('Model catalog probe requires a detectable native Codex version');
   const { router: port } = config.ports;

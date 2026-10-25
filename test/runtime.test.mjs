@@ -349,3 +349,14 @@ test('readiness fails during maintenance even when router process remains health
   assert.equal(report.maintenanceReport.state, 'abandoned');
   assert.equal(report.maintenanceReport.requiresRecovery, true);
 });
+
+test('catalog probe falls back to managed CLI version when optional native daemon is unavailable', async (t) => {
+  const { root, control } = await fixture(t);
+  await writeFile(
+    path.join(root, 'current-cli/bin/codex'),
+    `#!${process.execPath}\nif(process.argv.includes('--version')) console.log('codex-cli 0.164.0'); else process.exit(1);\n`,
+  );
+  const result = await control('probe');
+  assert.equal(result.status, 200);
+  assert.equal((await result.json()).modelCount, 1);
+});

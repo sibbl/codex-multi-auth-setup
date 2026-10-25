@@ -314,7 +314,7 @@ async function recover(config, payload) {
   const recoveryLock = path.join(lock, 'recovery.lock');
   if (!(await acquireLock(recoveryLock))) throw new Error('Another recovery is running');
   try {
-    const current = await readJson(path.join(lock, 'owner.json'));
+    let current = await readJson(path.join(lock, 'owner.json'));
     if (
       !recoverableAccountOperation(current) ||
       current.pid !== owner.pid ||
@@ -328,7 +328,7 @@ async function recover(config, payload) {
       serverConfigFiles(config),
       'recover account/config maintenance',
     );
-    await maintenanceRecord(config.root, current, 'recovering');
+    current = await maintenanceRecord(config.root, current, 'recovering');
     await control(config, 'drain');
     const status = await control(config, 'reload', 90_000);
     if (status.ready !== true)
